@@ -1,0 +1,96 @@
+#!/usr/bin/env node
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import axios from 'axios'; // Remove AxiosInstance import
+import { z } from 'zod'; // Import Zod for schema validation
+
+// Import configuration variables
+import {
+    GEMINI_API_KEY,
+    GEMINI_API_URL,
+    DEFAULT_OUTPUT_DIR,
+    CF_IMGBED_UPLOAD_URL, // Corrected import
+    CF_IMGBED_API_KEY,   // Corrected import
+    REQUEST_TIMEOUT
+} from './config';
+// Note: CF_ACCOUNT_ID and CF_PUBLIC_URL_BASE were removed from config.ts, so removed here too.
+
+// --- Tool Schemas and Handlers ---
+import { generateImageSchema, handleGenerateImage } from './tools/generateImage';
+// Import the exported shape for the refined schema
+import { editImageSchema, editImageShape, handleEditImage } from './tools/editImage';
+import { generateVideoSchema, handleGenerateVideo } from './tools/generateVideo';
+
+// --- Initialization ---
+
+// Validate essential configuration
+if (!GEMINI_API_KEY) {
+    console.error('[gemini-integrator-mcp] Error: Gemini API key (GEMINI_API_KEY) is not configured.');
+    process.exit(1); // Exit if key is missing
+}
+if (!GEMINI_API_URL) {
+    console.error('[gemini-integrator-mcp] Error: Gemini API URL (GEMINI_API_URL) is not configured.');
+    process.exit(1); // Exit if URL is missing
+}
+
+// Create a shared Axios instance for Gemini API calls
+// Note: Gemini API uses API Key in the URL query parameter, not usually in headers like OpenAI
+const axiosInstance = axios.create({ // Remove explicit type annotation
+    baseURL: GEMINI_API_URL, // Base URL is set, key will be added per request
+    timeout: REQUEST_TIMEOUT,
+    headers: {
+        'Content-Type': 'application/json',
+        // Gemini often uses x-goog-api-key header or key in query param
+        // We'll add the key in the request URL itself later
+    }
+});
+
+// Create the MCP Server instance
+const server = new McpServer({
+    name: 'gemini-integrator-mcp',
+    version: '1.0.0' // Initial version
+});
+
+// --- Tool Registration ---
+
+// Register the gemini_generate_image tool
+server.tool(
+    'gemini_generate_image',
+    generateImageSchema.shape, // Use .shape for basic object schema
+    // Remove 'any', let TS infer params type from schema shape
+    (validatedParams, extra) => handleGenerateImage(validatedParams, axiosInstance)
+);
+
+// Register the gemini_edit_image tool
+server.tool(
+    'gemini_edit_image',
+    editImageShape, // Use the explicitly exported shape for refined schema
+    // Remove 'any'
+    (validatedParams, extra) => handleEditImage(validatedParams, axiosInstance)
+);
+
+// Register the gemini_generate_video tool
+server.tool(
+    'gemini_generate_video',
+    generateVideoSchema.shape, // Use .shape for basic object schema
+    // Remove 'any'
+    (validatedParams, extra) => handleGenerateVideo(validatedParams, axiosInstance)
+);
+
+
+// --- Server Connection ---
+
+// Create the transport (stdio in this case)
+const transport = new StdioServerTransport();
+
+// Connect the server to the transport
+server.connect(transport)
+    .then(() => {
+        console.log('[gemini-integrator-mcp] Gemini Integrator MCP Server started successfully.');
+    })
+    .catch((error) => {
+        console.error('[gemini-integrator-mcp] Error starting server:', error);
+        process.exit(1);
+    });
+
+console.log('[gemini-integrator-mcp] Attempting to start Gemini Integrator MCP Server...');
