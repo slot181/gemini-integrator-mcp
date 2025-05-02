@@ -3,11 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import axios from 'axios'; // Remove AxiosInstance import
 // Import configuration variables (removed unused ones)
-import { GEMINI_API_KEY, GEMINI_API_URL, 
-// DEFAULT_OUTPUT_DIR, // Not used in index.ts
-// CF_IMGBED_UPLOAD_URL, // Not used in index.ts
-// CF_IMGBED_API_KEY,   // Not used in index.ts
-REQUEST_TIMEOUT } from './config.js'; // Add .js extension
+import { GEMINI_API_KEY, GEMINI_API_URL, REQUEST_TIMEOUT } from './config.js'; // Add .js extension
 // Note: CF_ACCOUNT_ID and CF_PUBLIC_URL_BASE were removed from config.ts, so removed here too.
 // --- Tool Schemas and Handlers ---
 // Import only the shape and handler for each tool
@@ -41,7 +37,7 @@ const axiosInstance = axios.create({
 // Create the MCP Server instance
 const server = new McpServer({
     name: 'gemini-integrator-mcp',
-    version: '1.0.9' // Initial version
+    version: '1.1.0' // Initial version
 });
 // --- Tool Registration ---
 // Register the gemini_generate_image tool

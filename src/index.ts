@@ -8,9 +8,6 @@ import { z } from 'zod'; // Import Zod for schema validation
 import {
     GEMINI_API_KEY,
     GEMINI_API_URL,
-    // DEFAULT_OUTPUT_DIR, // Not used in index.ts
-    // CF_IMGBED_UPLOAD_URL, // Not used in index.ts
-    // CF_IMGBED_API_KEY,   // Not used in index.ts
     REQUEST_TIMEOUT
 } from './config.js'; // Add .js extension
 // Note: CF_ACCOUNT_ID and CF_PUBLIC_URL_BASE were removed from config.ts, so removed here too.
@@ -51,7 +48,7 @@ const axiosInstance = axios.create({ // Remove explicit type annotation
 // Create the MCP Server instance
 const server = new McpServer({
     name: 'gemini-integrator-mcp',
-    version: '1.0.9' // Initial version
+    version: '1.1.0' // Initial version
 });
 
 // --- Tool Registration ---

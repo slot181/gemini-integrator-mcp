@@ -7,13 +7,9 @@ import { uploadToCfImgbed } from '../utils/cfUtils.js'; // Add .js extension
 import { GEMINI_API_KEY, DEFAULT_OUTPUT_DIR, GEMINI_API_URL, REQUEST_TIMEOUT } from '../config.js'; // Add .js extension
 // Define the input schema for the generateVideo tool using Zod
 export const generateVideoSchema = z.object({
-    prompt: z.string().min(1).describe("Descriptive text prompt detailing the desired video content."), // Moved description
-    negativePrompt: z.string().optional().describe("Text prompt describing content to avoid in the video."),
-    aspectRatio: z.enum(["16:9", "9:16", "1:1"]).optional().default("16:9").describe("Aspect ratio for the generated video."),
-    personGeneration: z.enum(["dont_allow", "allow_adult"]).optional().default("dont_allow").describe("Control generation of people ('dont_allow', 'allow_adult')."),
-    // numberOfVideos: z.number().int().min(1).max(2).optional().default(1).describe("Number of videos to generate (1 or 2)."), // Removed numberOfVideos
-    durationSeconds: z.number().int().min(5).max(8).optional().default(5).describe("Duration of each video in seconds (5-8)."),
-    enhance_prompt: z.boolean().optional().default(true).describe("Enable or disable the prompt enhancer. Defaults to enabled (true)."), // Added enhance_prompt
+    prompt: z.string().min(1).describe("Required. Descriptive text prompt detailing the desired video content."),
+    aspectRatio: z.enum(["16:9", "9:16", "1:1"]).optional().default("16:9").describe("Optional. Aspect ratio for the generated video. Defaults to 16:9."),
+    personGeneration: z.enum(["dont_allow", "allow_adult"]).optional().default("dont_allow").describe("Optional. Control generation of people ('dont_allow', 'allow_adult'). Defaults to dont_allow."),
 });
 // Helper function to delay execution
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -27,9 +23,9 @@ const MAX_POLLING_ATTEMPTS = 360; // Max attempts (e.g., 360 * 10s = 1 hour time
  */
 export async function handleGenerateVideo(params, axiosInstance // Use 'any' to bypass Axios type issues
 ) {
-    // Destructure new/removed params
-    const { prompt, aspectRatio, personGeneration, negativePrompt, durationSeconds, enhance_prompt } = params;
-    const videoOutputDir = path.join(DEFAULT_OUTPUT_DIR, 'video'); // Specific subfolder
+    // Destructure remaining params
+    const { prompt, aspectRatio, personGeneration } = params;
+    // const videoOutputDir = path.join(DEFAULT_OUTPUT_DIR, 'video'); // Removed unused variable
     try {
         console.log(`[generateVideo] Received request with prompt: "${prompt}"`);
         // --- 1. Initiate Async Video Generation ---
@@ -43,15 +39,9 @@ export async function handleGenerateVideo(params, axiosInstance // Use 'any' to 
             parameters: {
                 aspectRatio: aspectRatio,
                 personGeneration: personGeneration,
-                // numberOfVideos: numberOfVideos, // Removed
-                durationSeconds: durationSeconds,
-                enhance_prompt: enhance_prompt, // Added
+                // Removed other parameters
             }
         };
-        // Conditionally add negativePrompt to the parameters object if provided
-        if (negativePrompt) {
-            startRequestPayload.parameters.negativePrompt = negativePrompt;
-        }
         console.log(`[generateVideo] Calling Gemini API to start video generation: ${axiosInstance.defaults.baseURL}${startApiUrl}`);
         // Remove type argument as axiosInstance is 'any'
         const startResponse = await axiosInstance.post(startApiUrl, startRequestPayload);

@@ -5,7 +5,7 @@ import * as fs from 'fs/promises';
 import * as mime from 'mime-types';
 import type { TextContent } from '@modelcontextprotocol/sdk/types.js';
 import { GEMINI_API_KEY, GEMINI_API_URL, GEMINI_UNDERSTANDING_MODEL, REQUEST_TIMEOUT, DEFAULT_OUTPUT_DIR } from '../config.js';
-import { generateUniqueFilename, deleteFile, downloadFile } from '../utils/fileUtils.js';
+import { deleteFile, downloadFile } from '../utils/fileUtils.js';
 
 // --- Helper function to delay execution ---
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -53,7 +53,7 @@ type UnderstandMediaParams = z.infer<typeof understandMediaSchema>;
 // --- Google File API Response Interfaces ---
 interface FileInfo {
     name: string;
-    uri: string;
+    uri: string; // This is the full HTTPS URI returned by the File API
     mimeType: string;
     createTime: string;
     updateTime: string;
@@ -87,7 +87,7 @@ interface GeminiContentResponse {
 // Interface to store processed file info (including name for polling)
 interface ProcessedFileInfo {
     name?: string; // Name might not be available if using pre-uploaded URI directly
-    uri: string;
+    uri: string; // This should be the relative path 'files/xxxx' for generateContent
     mimeType: string;
     originalSource: string; // URL, path, or file_uri for logging/errors
 }
@@ -118,7 +118,7 @@ const SUPPORTED_MIME_TYPES = new Set([
 
 /**
  * Uploads a file to the Google File API using the global axios instance.
- * Returns the file name and URI upon successful upload.
+ * Returns the file name (relative path) and full URI upon successful upload.
  */
 async function uploadFileToGoogleApi(filePath: string, mimeType: string, displayName: string): Promise<{ name: string, uri: string }> {
     console.log(`[uploadFileToGoogleApi] Starting upload for: ${filePath}, MIME: ${mimeType}`);
@@ -191,6 +191,7 @@ async function uploadFileToGoogleApi(filePath: string, mimeType: string, display
             throw new Error(`File upload failed with status ${uploadResponse.status}. Response: ${JSON.stringify(uploadResponse.data)}`);
         }
 
+        // Return the relative name (files/xxx) and the full URI
         const { name, uri } = uploadResponse.data.file;
         console.log(`[uploadFileToGoogleApi] File uploaded successfully. Name: ${name}, URI: ${uri}`);
         return { name, uri };
@@ -272,14 +273,19 @@ export async function handleUnderstandMedia(
         // --- 1. Process each file input ---
         const processingPromises = files.map(async (fileSource) => {
             const originalSource = fileSource.url || fileSource.path || fileSource.file_uri || 'unknown';
-            let fileUri: string | undefined = fileSource.file_uri;
+            let fileUriForRequest: string | undefined; // URI to use in generateContent (relative path 'files/xxx')
             let mimeType: string | undefined = fileSource.mime_type;
-            let fileName: string | undefined;
+            let fileName: string | undefined; // Relative path 'files/xxx'
 
-            if (fileUri && mimeType) {
-                console.log(`[understandMedia] Using pre-uploaded file URI: ${fileUri} with MIME type: ${mimeType}`);
-                // Assume pre-uploaded files are ACTIVE or let Gemini handle the state check. No polling needed here.
+            // --- Handle pre-uploaded file_uri ---
+            if (fileSource.file_uri && mimeType) {
+                console.log(`[understandMedia] Using pre-uploaded file URI: ${fileSource.file_uri} with MIME type: ${mimeType}`);
+                // Use the relative path directly for the generateContent request
+                fileUriForRequest = fileSource.file_uri;
+                fileName = fileSource.file_uri; // Store the relative path as 'name' for consistency if needed later
+                // No polling needed
             }
+            // --- Handle url or path ---
             else if (fileSource.url || fileSource.path) {
                 let localFilePath: string | null = null;
                 let isTemp = false;
@@ -298,9 +304,8 @@ export async function handleUnderstandMedia(
 
                 if (!localFilePath) throw new Error(`Invalid file source object: ${JSON.stringify(fileSource)}`);
 
-                // Handle potential 'false' return from mime.lookup
                 const lookupResult = mime.lookup(localFilePath);
-                mimeType = lookupResult === false ? undefined : lookupResult; // Assign undefined if false
+                mimeType = lookupResult === false ? undefined : lookupResult;
 
                 if (!mimeType) {
                     if (isTemp) await deleteFile(localFilePath).catch(e => console.error(`[understandMedia] Error cleaning up temp file ${localFilePath} after MIME type failure:`, e));
@@ -316,7 +321,8 @@ export async function handleUnderstandMedia(
                 // Upload the file
                 const displayName = path.basename(localFilePath);
                 const uploadResult = await uploadFileToGoogleApi(localFilePath, mimeType, displayName);
-                fileUri = uploadResult.uri;
+                // Use the relative name (files/xxx) for the generateContent request URI
+                fileUriForRequest = uploadResult.name;
                 fileName = uploadResult.name;
                 filesToPoll.push(fileName);
             } else {
@@ -329,11 +335,12 @@ export async function handleUnderstandMedia(
             }
             console.log(`[understandMedia] Validated MIME type: ${mimeType} for source: ${originalSource}`);
 
-            if (!fileUri) {
+            if (!fileUriForRequest) {
                  throw new Error(`Failed to obtain file URI for source: ${originalSource}`);
             }
 
-            processedFiles.push({ name: fileName, uri: fileUri, mimeType: mimeType, originalSource: originalSource });
+            // Store the relative URI ('files/xxx') needed for generateContent
+            processedFiles.push({ name: fileName, uri: fileUriForRequest, mimeType: mimeType, originalSource: originalSource });
 
         }); // End map
 
@@ -360,13 +367,20 @@ export async function handleUnderstandMedia(
 
         // --- 3. Call Gemini Generate Content ---
         const generateContentUrl = `/v1beta/models/${GEMINI_UNDERSTANDING_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+
+        console.log('[understandMedia] Processed files before mapping to request parts:', JSON.stringify(processedFiles, null, 2));
+
         const requestParts = [
             { text: text },
+            // Use the stored relative URI ('files/xxx') here
             ...processedFiles.map(fileInfo => ({
                 file_data: { mime_type: fileInfo.mimeType, file_uri: fileInfo.uri }
             }))
         ];
         const requestPayload = { contents: [{ parts: requestParts }] };
+
+        console.log('[understandMedia] Final request payload:', JSON.stringify(requestPayload, null, 2));
+
 
         console.log(`[understandMedia] Calling Gemini (${GEMINI_UNDERSTANDING_MODEL}) with ${processedFiles.length} file(s)... URL: ${axiosInstance.defaults.baseURL}${generateContentUrl}`);
         const response = await axiosInstance.post(generateContentUrl, requestPayload, { timeout: REQUEST_TIMEOUT });
