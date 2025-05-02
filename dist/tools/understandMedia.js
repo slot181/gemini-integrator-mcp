@@ -46,7 +46,7 @@ const SUPPORTED_MIME_TYPES = new Set([
     'video/mp4', 'video/mpeg', 'video/mov', 'video/avi', 'video/x-flv',
     'video/mpg', 'video/webm', 'video/wmv', 'video/3gpp',
     // Audio
-    'audio/wav', 'audio/mp3',
+    'audio/wav', 'audio/mp3', 'audio/mpeg',
     'audio/aiff', 'audio/aac', 'audio/ogg', 'audio/flac',
     // Image
     'image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif',
