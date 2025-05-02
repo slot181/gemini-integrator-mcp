@@ -74,7 +74,7 @@ async function handleGenerateImage(params, axiosInstance // Use 'any' for now to
                     ]
                 }],
             // Specify that we want an IMAGE response modality
-            generationConfig: { responseModalities: ["IMAGE"] } // Or ["TEXT", "IMAGE"] if you expect text too
+            generationConfig: { responseModalities: ["TEXT", "IMAGE"] } // Or ["TEXT", "IMAGE"] if you expect text too
         };
         console.log(`[generateImage] Calling Gemini API at: ${axiosInstance.defaults.baseURL}${apiUrl}`);
         // Remove the type argument <GeminiImageGenerationResponse> since axiosInstance is 'any'

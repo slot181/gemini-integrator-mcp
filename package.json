@@ -1,5 +1,5 @@
 {
-  "name": "gemini-integrator-mcp",
+  "name": "@stone181/gemini-integrator-mcp",
   "version": "1.0.0",
   "description": "MCP Server for Gemini Image/Video Generation and Editing",
   "main": "dist/index.js",

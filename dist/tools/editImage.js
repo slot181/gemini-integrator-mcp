@@ -191,7 +191,7 @@ async function handleEditImage(params, axiosInstance // Use 'any' to bypass Axio
                         }
                     ]
                 }],
-            generationConfig: { responseModalities: ["IMAGE"] } // Expecting an image back
+            generationConfig: { responseModalities: ["TEXT", "IMAGE"] } // Expecting an image back
         };
         console.log(`[editImage] Calling Gemini API at: ${axiosInstance.defaults.baseURL}${apiUrl}`);
         const response = await axiosInstance.post(apiUrl, requestPayload); // No type arg due to 'any'
