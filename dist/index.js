@@ -35,7 +35,7 @@ const axiosInstance = axios.create({
 // Create the MCP Server instance
 const server = new McpServer({
     name: 'gemini-integrator-mcp',
-    version: '1.0.0' // Initial version
+    version: '1.0.1' // Initial version
 });
 // --- Tool Registration ---
 // Register the gemini_generate_image tool
