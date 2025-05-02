@@ -1,25 +1,47 @@
 import { z } from 'zod';
 import axios from 'axios'; // Default import
-// Remove AxiosInstance and AxiosRequestConfig type imports
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import * as mime from 'mime-types';
 import { GEMINI_API_KEY, GEMINI_UNDERSTANDING_MODEL, REQUEST_TIMEOUT, DEFAULT_OUTPUT_DIR } from '../config.js';
-// Import all needed utils
 import { deleteFile, downloadFile } from '../utils/fileUtils.js';
-// Define the base object schema first
+// Schema for a single file source (URL or Path)
+const fileSourceSchema = z.object({
+    url: z.string().url().optional().describe("URL of the file (image, video, audio, pdf, text, code)."),
+    path: z.string().optional().describe("Local path to the file (image, video, audio, pdf, text, code)."),
+}).refine(data => !!data.url !== !!data.path, {
+    message: "Provide either 'url' or 'path' for each file, but not both.",
+});
+// Define the base object schema first, accepting an array of files
 const understandMediaBaseSchema = z.object({
-    text: z.string().min(1).describe("The question or instruction for the model regarding the media content."),
-    url: z.string().url().optional().describe("URL of the video or audio file to understand."),
-    path: z.string().optional().describe("Local path to the video or audio file to understand."),
+    text: z.string().min(1).describe("The question or instruction for the model regarding the provided files."),
+    files: z.array(fileSourceSchema).min(1).describe("An array of files (URL or local path) to understand. Supports images, videos, audio, PDFs, text, and code files."),
 });
-// Define the refined schema for validation logic (used internally if needed, but shape is for registration)
-export const understandMediaSchema = understandMediaBaseSchema.refine(data => !!data.url !== !!data.path, {
-    message: "Provide either 'url' or 'path', but not both.",
-    path: ["url", "path"], // Indicate which fields this refinement relates to
-});
+// Refined schema (though base shape is used for registration)
+export const understandMediaSchema = understandMediaBaseSchema; // No top-level refine needed now
 // Export the base shape specifically for tool registration
 export const understandMediaShape = understandMediaBaseSchema.shape;
+// Set of supported MIME types based on user feedback
+const SUPPORTED_MIME_TYPES = new Set([
+    // Video
+    'video/mp4', 'video/mpeg', 'video/mov', 'video/avi', 'video/x-flv',
+    'video/mpg', 'video/webm', 'video/wmv', 'video/3gpp',
+    // Audio
+    'audio/wav', 'audio/mp3', 'audio/aiff', 'audio/aac', 'audio/ogg', 'audio/flac',
+    // Image
+    'image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif',
+    // Document/Text/Code
+    'application/pdf',
+    'application/x-javascript', 'text/javascript',
+    'application/x-python', 'text/x-python',
+    'text/plain',
+    'text/html',
+    'text/css',
+    'text/markdown', // Note: Gemini docs might use text/md, but text/markdown is more standard
+    'text/csv',
+    'text/xml', 'application/xml', // Allow both common XML types
+    'text/rtf', 'application/rtf' // Allow both common RTF types
+]);
 /**
  * Uploads a file to the Google File API using the global axios instance.
  */
@@ -28,7 +50,7 @@ async function uploadFileToGoogleApi(filePath, mimeType, displayName) {
     const stats = await fs.stat(filePath);
     const numBytes = stats.size;
     if (numBytes === 0) {
-        throw new Error('File is empty and cannot be uploaded.');
+        throw new Error(`File is empty and cannot be uploaded: ${filePath}`);
     }
     // Use the full URL for the File API endpoint
     const startUploadUrl = `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${GEMINI_API_KEY}`;
@@ -54,24 +76,25 @@ async function uploadFileToGoogleApi(filePath, mimeType, displayName) {
         console.log('[uploadFileToGoogleApi] Got upload URL.');
     }
     catch (error) {
-        // Revert to less type-safe error checking like other files
         const err = error;
+        let message = 'Failed to initiate resumable upload.';
         if (err.response && err.message) {
+            message += ` Axios Error: ${err.message} - ${JSON.stringify(err.response?.data)}`;
             console.error('[uploadFileToGoogleApi] Axios error initiating resumable upload:', err.response?.data || err.message);
         }
         else if (err.message) {
+            message += ` Error: ${err.message}`;
             console.error('[uploadFileToGoogleApi] Error initiating resumable upload:', err.message);
         }
         else {
             console.error('[uploadFileToGoogleApi] Unknown error initiating resumable upload:', error);
         }
-        throw new Error(`Failed to initiate resumable upload.`);
+        throw new Error(message);
     }
     // 2. Upload File Data
     console.log('[uploadFileToGoogleApi] Uploading file data...');
     try {
         const fileData = await fs.readFile(filePath);
-        // Remove explicit AxiosRequestConfig type
         const uploadConfig = {
             headers: {
                 'Content-Length': numBytes.toString(),
@@ -83,90 +106,107 @@ async function uploadFileToGoogleApi(filePath, mimeType, displayName) {
             maxContentLength: Infinity,
             timeout: REQUEST_TIMEOUT * 5,
         };
-        // Use global axios for the upload URL
-        const uploadResponse = await axios.post(uploadUrl, fileData, uploadConfig); // Keep type arg here for global axios
+        const uploadResponse = await axios.post(uploadUrl, fileData, uploadConfig);
         if (uploadResponse.status !== 200 || !uploadResponse.data?.file?.uri) {
             console.error('[uploadFileToGoogleApi] File upload failed or URI missing:', uploadResponse.data);
-            throw new Error(`File upload failed with status ${uploadResponse.status}.`);
+            throw new Error(`File upload failed with status ${uploadResponse.status}. Response: ${JSON.stringify(uploadResponse.data)}`);
         }
         const fileUri = uploadResponse.data.file.uri;
         console.log(`[uploadFileToGoogleApi] File uploaded successfully. URI: ${fileUri}`);
         return fileUri;
     }
     catch (error) {
-        // Revert to less type-safe error checking
         const err = error;
+        let message = 'Failed to upload file data.';
         if (err.response && err.message) {
+            message += ` Axios Error: ${err.message} - ${JSON.stringify(err.response?.data)}`;
             console.error('[uploadFileToGoogleApi] Axios error uploading file data:', err.response?.data || err.message);
         }
         else if (err.message) {
+            message += ` Error: ${err.message}`;
             console.error('[uploadFileToGoogleApi] Error uploading file data:', err.message);
         }
         else {
             console.error('[uploadFileToGoogleApi] Unknown error uploading file data:', error);
         }
-        throw new Error(`Failed to upload file data.`);
+        throw new Error(message);
     }
 }
 /**
- * Handles the media understanding tool request.
- * Note: The input 'params' type might technically be inferred from the base shape used in registration,
- * but the refined schema logic is handled by the MCP SDK before this handler is called.
+ * Handles the media understanding tool request for multiple files.
  */
-export async function handleUnderstandMedia(params, // Keep using the refined type here for clarity within the handler
-axiosInstance // Use 'any' type like other tools
+export async function handleUnderstandMedia(params, axiosInstance // Use 'any' type like other tools
 ) {
-    // The refine logic (url XOR path) is enforced by the SDK before this handler runs
-    const { text, url, path: localPathInput } = params;
-    const mediaOutputDir = path.join(DEFAULT_OUTPUT_DIR, 'media_understanding_tmp'); // Specific subfolder for downloads
-    let localFilePath = null;
-    let cleanupNeeded = false; // Flag to delete downloaded file
+    const { text, files } = params;
+    const tempSubDir = 'media_understanding_tmp'; // Specific subfolder for downloads
+    const processedFiles = [];
+    const cleanupPaths = []; // Keep track of files to delete
     try {
-        console.log(`[understandMedia] Received request with text: "${text}"`);
-        // --- 1. Get Local File Path ---
-        if (url) {
-            console.log(`[understandMedia] Downloading media from URL: ${url}`);
-            localFilePath = await downloadFile(url, DEFAULT_OUTPUT_DIR, 'media_understanding_tmp', 'downloaded_media');
-            cleanupNeeded = true;
-            console.log(`[understandMedia] Media downloaded to: ${localFilePath}`);
-        }
-        else if (localPathInput) {
-            try {
-                await fs.access(localPathInput);
-                localFilePath = path.resolve(localPathInput);
-                console.log(`[understandMedia] Using local file: ${localFilePath}`);
+        console.log(`[understandMedia] Received request with text: "${text}" and ${files.length} file(s).`);
+        // --- 1. Process each file input ---
+        for (const fileSource of files) {
+            let localFilePath = null;
+            let isTemp = false;
+            const originalSource = fileSource.url || fileSource.path || 'unknown'; // For logging
+            if (fileSource.url) {
+                console.log(`[understandMedia] Downloading media from URL: ${fileSource.url}`);
+                try {
+                    localFilePath = await downloadFile(fileSource.url, DEFAULT_OUTPUT_DIR, tempSubDir, 'downloaded_media');
+                    isTemp = true;
+                    cleanupPaths.push(localFilePath); // Mark for cleanup
+                    console.log(`[understandMedia] Media downloaded to: ${localFilePath}`);
+                }
+                catch (downloadError) {
+                    console.error(`[understandMedia] Failed to download ${fileSource.url}:`, downloadError);
+                    throw new Error(`Failed to download file from URL: ${fileSource.url}. Error: ${downloadError instanceof Error ? downloadError.message : String(downloadError)}`);
+                }
             }
-            catch (err) {
-                // This error might be redundant if SDK validation catches it first, but good defense
-                throw new Error(`Local file path not found or inaccessible: ${localPathInput}`);
+            else if (fileSource.path) {
+                try {
+                    await fs.access(fileSource.path);
+                    localFilePath = path.resolve(fileSource.path);
+                    console.log(`[understandMedia] Using local file: ${localFilePath}`);
+                }
+                catch (err) {
+                    throw new Error(`Local file path not found or inaccessible: ${fileSource.path}`);
+                }
             }
+            if (!localFilePath) {
+                throw new Error(`Internal Error: Invalid file source object processed: ${JSON.stringify(fileSource)}`);
+            }
+            // --- 2. Determine & Validate MIME Type ---
+            const mimeType = mime.lookup(localFilePath);
+            if (!mimeType) {
+                throw new Error(`Could not determine MIME type for file: ${localFilePath} (Source: ${originalSource})`);
+            }
+            // --- Use the Set for validation ---
+            if (!SUPPORTED_MIME_TYPES.has(mimeType)) {
+                // Attempt cleanup before throwing
+                if (isTemp)
+                    await deleteFile(localFilePath).catch(e => console.error(`[understandMedia] Error cleaning up temp file ${localFilePath} after MIME type failure:`, e));
+                throw new Error(`Unsupported file type '${mimeType}' for file: ${localFilePath} (Source: ${originalSource}). Supported types include common image, video, audio, PDF, text, and code formats.`);
+            }
+            console.log(`[understandMedia] Determined MIME type: ${mimeType} for ${localFilePath}`);
+            // --- 3. Upload to Google File API ---
+            const displayName = path.basename(localFilePath);
+            const fileUri = await uploadFileToGoogleApi(localFilePath, mimeType, displayName);
+            processedFiles.push({ uri: fileUri, mimeType: mimeType, originalSource: originalSource });
+        } // End loop through files
+        if (processedFiles.length === 0) {
+            throw new Error("No files were successfully processed for upload.");
         }
-        // This check might also be redundant due to SDK validation based on the refined schema
-        if (!localFilePath) {
-            throw new Error("Internal Error: No valid media source (URL or Path) was processed.");
-        }
-        // --- 2. Determine MIME Type ---
-        const mimeType = mime.lookup(localFilePath);
-        if (!mimeType) {
-            if (cleanupNeeded)
-                await deleteFile(localFilePath).catch(e => console.error(`[understandMedia] Error cleaning up temp file ${localFilePath} after MIME type failure:`, e));
-            throw new Error(`Could not determine MIME type for file: ${localFilePath}`);
-        }
-        console.log(`[understandMedia] Determined MIME type: ${mimeType}`);
-        // --- 3. Upload to Google File API ---
-        const displayName = path.basename(localFilePath);
-        const fileUri = await uploadFileToGoogleApi(localFilePath, mimeType, displayName);
-        // --- 4. Call Gemini Generate Content using the passed axiosInstance ---
+        // --- 4. Call Gemini Generate Content ---
         const generateContentUrl = `/v1beta/models/${GEMINI_UNDERSTANDING_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+        const requestParts = [
+            { text: text },
+            ...processedFiles.map(fileInfo => ({
+                file_data: { mime_type: fileInfo.mimeType, file_uri: fileInfo.uri }
+            }))
+        ];
         const requestPayload = {
-            contents: [{
-                    parts: [
-                        { text: text },
-                        { file_data: { mime_type: mimeType, file_uri: fileUri } }
-                    ]
-                }]
+            contents: [{ parts: requestParts }]
         };
-        console.log(`[understandMedia] Calling Gemini (${GEMINI_UNDERSTANDING_MODEL}) to generate content... URL: ${axiosInstance.defaults.baseURL}${generateContentUrl}`);
+        console.log(`[understandMedia] Calling Gemini (${GEMINI_UNDERSTANDING_MODEL}) with ${processedFiles.length} file(s)... URL: ${axiosInstance.defaults.baseURL}${generateContentUrl}`);
         const response = await axiosInstance.post(generateContentUrl, requestPayload, { timeout: REQUEST_TIMEOUT });
         // --- 5. Process Response ---
         const responseData = response.data;
@@ -194,7 +234,10 @@ axiosInstance // Use 'any' type like other tools
             const responseInfo = err.response ? ` Status: ${err.response.status}. Data: ${JSON.stringify(err.response.data)}` : 'No response data.';
             errorMessage = `API request failed: ${err.message}.${responseInfo}`;
         }
-        else if (err.message) {
+        else if (error instanceof Error) { // Check if it's a standard Error
+            errorMessage = error.message;
+        }
+        else if (err.message) { // Fallback for other error-like objects
             errorMessage = err.message;
         }
         else {
@@ -203,9 +246,12 @@ axiosInstance // Use 'any' type like other tools
         return { content: [{ type: 'text', text: `Error understanding media: ${errorMessage}` }] };
     }
     finally {
-        // --- 6. Cleanup Downloaded File ---
-        if (cleanupNeeded && localFilePath) {
-            await deleteFile(localFilePath).catch(e => console.error(`[understandMedia] Failed to clean up downloaded file ${localFilePath}:`, e));
+        // --- 6. Cleanup Downloaded Files ---
+        if (cleanupPaths.length > 0) {
+            console.log(`[understandMedia] Cleaning up ${cleanupPaths.length} downloaded temporary file(s)...`);
+            for (const tempPath of cleanupPaths) {
+                await deleteFile(tempPath).catch(e => console.error(`[understandMedia] Failed to clean up downloaded file ${tempPath}:`, e));
+            }
         }
     }
 }
