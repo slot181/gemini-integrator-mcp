@@ -11,10 +11,12 @@ import { GEMINI_API_KEY, DEFAULT_OUTPUT_DIR, GEMINI_API_URL, REQUEST_TIMEOUT } f
 
 // Define the input schema for the generateVideo tool using Zod
 export const generateVideoSchema = z.object({
-    prompt: z.string().min(1, "Prompt cannot be empty"),
-    aspectRatio: z.enum(["16:9", "9:16", "1:1"]).optional().default("16:9"), // Example parameter
-    personGeneration: z.enum(["allow", "dont_allow"]).optional().default("dont_allow"), // Example parameter
-    // Add other potential video parameters
+    prompt: z.string().min(1, "Descriptive text prompt detailing the desired video content."),
+    negativePrompt: z.string().optional().describe("Text prompt describing content to avoid in the video."),
+    aspectRatio: z.enum(["16:9", "9:16", "1:1"]).optional().default("16:9").describe("Aspect ratio for the generated video."),
+    personGeneration: z.enum(["dont_allow", "allow_adult"]).optional().default("dont_allow").describe("Control generation of people ('dont_allow', 'allow_adult')."),
+    numberOfVideos: z.number().int().min(1).max(2).optional().default(1).describe("Number of videos to generate (1 or 2)."),
+    durationSeconds: z.number().int().min(5).max(8).optional().default(5).describe("Duration of each video in seconds (5-8)."),
 });
 
 // Type definition for the validated parameters
@@ -74,7 +76,7 @@ export async function handleGenerateVideo(
     params: GenerateVideoParams,
     axiosInstance: any // Use 'any' to bypass Axios type issues
 ): Promise<{ content: Array<TextContent> }> { // Update return signature
-    const { prompt, aspectRatio, personGeneration } = params;
+    const { prompt, aspectRatio, personGeneration, negativePrompt, numberOfVideos, durationSeconds } = params; // Include new params
     const videoOutputDir = path.join(DEFAULT_OUTPUT_DIR, 'video'); // Specific subfolder
 
     try {
@@ -83,14 +85,19 @@ export async function handleGenerateVideo(
         // --- 1. Initiate Async Video Generation ---
         // Adjust model name based on Gemini docs (e.g., 'veo-2.0-generate-001')
         const startApiUrl = `/v1beta/models/veo-2.0-generate-001:predictLongRunning?key=${GEMINI_API_KEY}`;
-        const startRequestPayload = {
-            instances: [{ prompt }],
-            parameters: {
-                aspectRatio,
-                personGeneration,
-                // Add other parameters from schema if needed
-            }
+        // Correct the payload structure based on the error message (remove 'instances' and 'parameters' nesting)
+        const startRequestPayload: any = { // Use 'any' temporarily for flexibility
+            prompt: prompt,
+            aspectRatio: aspectRatio,
+            personGeneration: personGeneration,
+            numberOfVideos: numberOfVideos,
+            durationSeconds: durationSeconds,
         };
+        // Conditionally add negativePrompt if provided
+        if (negativePrompt) {
+            startRequestPayload.negativePrompt = negativePrompt;
+        }
+
 
         console.log(`[generateVideo] Calling Gemini API to start video generation: ${axiosInstance.defaults.baseURL}${startApiUrl}`);
         // Remove type argument as axiosInstance is 'any'

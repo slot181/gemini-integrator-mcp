@@ -4,14 +4,13 @@ import * as path from 'path';
 // Import shared utilities and config
 import { saveFile, generateUniqueFilename } from '../utils/fileUtils.js'; // Add .js extension
 import { uploadToCfImgbed } from '../utils/cfUtils.js'; // Add .js extension
-import { GEMINI_API_KEY, DEFAULT_OUTPUT_DIR } from '../config.js'; // Add .js extension
+// Import the new model config and API key
+import { GEMINI_API_KEY, DEFAULT_OUTPUT_DIR, GEMINI_IMAGE_GEN_MODEL } from '../config.js';
 // Define the input schema for the generateImage tool using Zod
 export const generateImageSchema = z.object({
-    prompt: z.string().min(1, "Prompt cannot be empty"),
-    // Add other potential Gemini parameters as needed (optional)
-    // e.g., negative_prompt: z.string().optional(),
-    // e.g., style_raw: z.string().optional(),
-    // e.g., aspect_ratio: z.enum(["16:9", "1:1", "9:16"]).optional(),
+    prompt: z.string().min(1, "Descriptive text prompt for image generation."),
+    // Add aspectRatio as it's used by imagen-3.0
+    aspectRatio: z.enum(["1:1", "3:4", "4:3", "9:16", "16:9"]).optional().default("1:1").describe("Aspect ratio for the generated image (ignored by gemini-2.0 model)."),
 });
 /**
  * Handles the image generation tool request.
@@ -21,35 +20,73 @@ export const generateImageSchema = z.object({
 export async function handleGenerateImage(params, axiosInstance // Use 'any' for now to bypass the type issue
 // Update return signature to only use TextContent
 ) {
-    const { prompt } = params;
+    // Destructure aspectRatio from params as well
+    const { prompt, aspectRatio } = params;
     const imageOutputDir = path.join(DEFAULT_OUTPUT_DIR, 'image'); // Specific subfolder for generated images
+    const selectedModel = GEMINI_IMAGE_GEN_MODEL; // Get the configured model
+    let apiUrl = '';
+    let requestPayload = {};
+    let response; // To store the API response
     try {
-        console.log(`[generateImage] Received request with prompt: "${prompt}"`);
-        // Construct the API URL with the API key
-        // Adjust the model name as needed (e.g., 'gemini-pro-vision', 'gemini-1.5-flash', etc.)
-        // The example uses 'gemini-2.0-flash-exp-image-generation'
-        const apiUrl = `/v1beta/models/gemini-2.0-flash-exp-image-generation:generateContent?key=${GEMINI_API_KEY}`;
-        // Construct the request payload based on Gemini API docs
-        const requestPayload = {
-            contents: [{
-                    parts: [
-                        { text: prompt }
-                    ]
-                }],
-            // Specify that we want an IMAGE response modality
-            generationConfig: { responseModalities: ["TEXT", "IMAGE"] } // Or ["TEXT", "IMAGE"] if you expect text too
-        };
-        console.log(`[generateImage] Calling Gemini API at: ${axiosInstance.defaults.baseURL}${apiUrl}`);
-        // Remove the type argument <GeminiImageGenerationResponse> since axiosInstance is 'any'
-        const response = await axiosInstance.post(apiUrl, requestPayload);
-        // --- Process Gemini Response ---
-        // We'll need to be careful accessing response.data as it's now 'any'
-        const parts = response.data?.candidates?.[0]?.content?.parts;
-        // Add explicit type for 'part' in the find callback
-        const imagePart = parts?.find((part) => part.inlineData && part.inlineData.mimeType.startsWith('image/'));
+        console.log(`[generateImage] Received request with prompt: "${prompt}", aspectRatio: ${aspectRatio}, using model: ${selectedModel}`);
+        // --- Construct API URL and Payload based on Model ---
+        if (selectedModel === 'imagen-3.0-generate-002') {
+            apiUrl = `/v1beta/models/imagen-3.0-generate-002:predict?key=${GEMINI_API_KEY}`;
+            requestPayload = {
+                instances: [{ prompt: prompt }],
+                parameters: {
+                    sampleCount: 1, // Hardcoded as requested (corresponds to numberOfImages: 1)
+                    aspectRatio: aspectRatio,
+                    personGeneration: "ALLOW_ADULT" // Hardcoded as requested
+                }
+            };
+            console.log(`[generateImage] Calling Imagen 3 API at: ${axiosInstance.defaults.baseURL}${apiUrl}`);
+            response = await axiosInstance.post(apiUrl, requestPayload);
+        }
+        else { // Default to gemini-2.0-flash or other similar models
+            // Use the selectedModel in the URL
+            apiUrl = `/v1beta/models/${selectedModel}:generateContent?key=${GEMINI_API_KEY}`;
+            requestPayload = {
+                contents: [{
+                        parts: [{ text: prompt }]
+                    }],
+                // Specify that we want an IMAGE response modality
+                generationConfig: { responseModalities: ["TEXT", "IMAGE"] }
+            };
+            console.log(`[generateImage] Calling Gemini API at: ${axiosInstance.defaults.baseURL}${apiUrl}`);
+            response = await axiosInstance.post(apiUrl, requestPayload);
+        }
+        // --- Process Gemini/Imagen Response ---
+        let imagePart = null;
+        if (selectedModel === 'imagen-3.0-generate-002') {
+            // Adjust response parsing for Imagen 3's 'predict' endpoint structure
+            // This structure needs verification based on actual API response
+            // Assuming it might be in response.data.predictions[0].bytesBase64Encoded or similar
+            const prediction = response.data?.predictions?.[0];
+            if (prediction?.bytesBase64Encoded && prediction?.mimeType?.startsWith('image/')) {
+                imagePart = {
+                    inlineData: {
+                        mimeType: prediction.mimeType,
+                        data: prediction.bytesBase64Encoded
+                    }
+                };
+                console.log('[generateImage] Extracted image data from Imagen 3 prediction.');
+            }
+            else {
+                console.error('[generateImage] Unexpected response structure from Imagen 3:', JSON.stringify(response.data));
+            }
+        }
+        else {
+            // Original parsing for generateContent endpoint
+            const parts = response.data?.candidates?.[0]?.content?.parts;
+            imagePart = parts?.find((part) => part.inlineData && part.inlineData.mimeType.startsWith('image/'));
+            if (imagePart) {
+                console.log('[generateImage] Extracted image data from Gemini candidate.');
+            }
+        }
         if (!imagePart || !imagePart.inlineData) {
-            console.error('[generateImage] No image data found in Gemini response:', JSON.stringify(response.data));
-            throw new Error('Gemini API did not return image data.');
+            console.error('[generateImage] No image data found in API response:', JSON.stringify(response.data));
+            throw new Error('API did not return valid image data.');
         }
         const base64Data = imagePart.inlineData.data;
         const mimeType = imagePart.inlineData.mimeType;
