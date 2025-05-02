@@ -24,6 +24,7 @@ export declare function deleteFile(filePath: string): Promise<void>;
 /**
  * Downloads a file from a URL to a specified directory.
  * Generates a unique filename based on prefix and detected/fallback extension.
+ * Prioritizes Content-Type header, then URL path extension.
  *
  * @param url The URL of the file to download.
  * @param outputDir The base directory to save the downloaded file.

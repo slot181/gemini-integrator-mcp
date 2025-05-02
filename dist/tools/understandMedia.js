@@ -14,8 +14,10 @@ const fileSourceSchema = z.object({
 });
 // Define the base object schema first, accepting an array of files
 const understandMediaBaseSchema = z.object({
-    text: z.string().min(1).describe("The question or instruction for the model regarding the provided files."),
-    files: z.array(fileSourceSchema).min(1).describe("An array of files (URL or local path) to understand. Supports images, videos, audio, PDFs, text, and code files."),
+    // Updated description for 'text'
+    text: z.string().min(1).describe("Required. The specific question or instruction for the AI model about the content of the provided file(s). E.g., 'Summarize this document', 'Describe this image', 'Transcribe this audio'. This field must contain the textual prompt."),
+    // Updated description for 'files'
+    files: z.array(fileSourceSchema).min(1).describe("Required. An array containing one or more file objects. Each object *must* specify either a 'url' or a 'path' key pointing to a supported file (image, video, audio, PDF, text, code). Example: [{path: '/path/to/report.pdf'}, {url: 'https://example.com/image.png'}]"),
 });
 // Refined schema (though base shape is used for registration)
 export const understandMediaSchema = understandMediaBaseSchema; // No top-level refine needed now
@@ -138,7 +140,7 @@ async function uploadFileToGoogleApi(filePath, mimeType, displayName) {
 export async function handleUnderstandMedia(params, axiosInstance // Use 'any' type like other tools
 ) {
     const { text, files } = params;
-    const tempSubDir = 'media_understanding_tmp'; // Specific subfolder for downloads
+    const tempSubDir = 'tmp'; // Use 'tmp' subfolder consistent with other tools
     const processedFiles = [];
     const cleanupPaths = []; // Keep track of files to delete
     try {
@@ -151,6 +153,7 @@ export async function handleUnderstandMedia(params, axiosInstance // Use 'any' t
             if (fileSource.url) {
                 console.log(`[understandMedia] Downloading media from URL: ${fileSource.url}`);
                 try {
+                    // Use the consistent 'tmp' subfolder
                     localFilePath = await downloadFile(fileSource.url, DEFAULT_OUTPUT_DIR, tempSubDir, 'downloaded_media');
                     isTemp = true;
                     cleanupPaths.push(localFilePath); // Mark for cleanup
@@ -177,6 +180,9 @@ export async function handleUnderstandMedia(params, axiosInstance // Use 'any' t
             // --- 2. Determine & Validate MIME Type ---
             const mimeType = mime.lookup(localFilePath);
             if (!mimeType) {
+                // Attempt cleanup before throwing
+                if (isTemp)
+                    await deleteFile(localFilePath).catch(e => console.error(`[understandMedia] Error cleaning up temp file ${localFilePath} after MIME type failure:`, e));
                 throw new Error(`Could not determine MIME type for file: ${localFilePath} (Source: ${originalSource})`);
             }
             // --- Use the Set for validation ---
@@ -243,15 +249,21 @@ export async function handleUnderstandMedia(params, axiosInstance // Use 'any' t
         else {
             errorMessage = `Caught non-standard error: ${String(error)}`;
         }
+        // Ensure cleanup happens even if the main logic fails
+        // await Promise.all(cleanupPaths.map(p => deleteFile(p).catch(e => console.error(`[understandMedia] Error during cleanup for ${p}:`, e)))); // Cleanup in catch? Risky if error is during cleanup itself.
         return { content: [{ type: 'text', text: `Error understanding media: ${errorMessage}` }] };
     }
     finally {
         // --- 6. Cleanup Downloaded Files ---
         if (cleanupPaths.length > 0) {
             console.log(`[understandMedia] Cleaning up ${cleanupPaths.length} downloaded temporary file(s)...`);
-            for (const tempPath of cleanupPaths) {
-                await deleteFile(tempPath).catch(e => console.error(`[understandMedia] Failed to clean up downloaded file ${tempPath}:`, e));
-            }
+            // Use Promise.allSettled for cleanup to ensure all attempts are made even if some fail
+            const results = await Promise.allSettled(cleanupPaths.map(tempPath => deleteFile(tempPath)));
+            results.forEach((result, index) => {
+                if (result.status === 'rejected') {
+                    console.error(`[understandMedia] Failed to clean up downloaded file ${cleanupPaths[index]}:`, result.reason);
+                }
+            });
         }
     }
 }

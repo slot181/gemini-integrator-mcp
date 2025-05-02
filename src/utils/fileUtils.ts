@@ -5,6 +5,7 @@ import axios from 'axios'; // Need axios for downloading
 import { Stream } from 'stream'; // For stream typing
 import * as crypto from 'crypto'; // For temp filenames
 import { REQUEST_TIMEOUT } from '../config.js'; // Import timeout
+import * as mime from 'mime-types'; // Import mime-types for fallback lookup
 
 /**
  * Saves data (typically base64 decoded image/video) to a file.
@@ -61,17 +62,22 @@ export async function deleteFile(filePath: string): Promise<void> {
         // Ignore error if file doesn't exist (it might have been cleaned up already)
         if (error.code !== 'ENOENT') {
             console.error(`[fileUtils] Error deleting file ${filePath}:`, error);
-            // Decide if you want to throw or just log the error
-            // throw new Error(`Failed to delete file: ${error.message}`);
         } else {
             console.log(`[fileUtils] File not found for deletion (already deleted?): ${filePath}`);
         }
     }
 }
 
+// Helper function to check if an object is an async iterable
+function isAsyncIterable(obj: any): obj is AsyncIterable<any> {
+  return obj != null && typeof obj[Symbol.asyncIterator] === 'function';
+}
+
+
 /**
  * Downloads a file from a URL to a specified directory.
  * Generates a unique filename based on prefix and detected/fallback extension.
+ * Prioritizes Content-Type header, then URL path extension.
  *
  * @param url The URL of the file to download.
  * @param outputDir The base directory to save the downloaded file.
@@ -84,12 +90,12 @@ export async function downloadFile(url: string, outputDir: string, subfolder: st
     const fullDirPath = path.resolve(outputDir, subfolder);
     await fs.mkdir(fullDirPath, { recursive: true });
 
-    let tempFilePath = path.join(fullDirPath, `${filenamePrefix}-${crypto.randomBytes(8).toString('hex')}`); // Temp name without extension
-    let finalFilePath = ''; // Will be determined after getting headers
+    let finalFilePath = ''; // Will be determined after getting headers/URL path
+    let response; // Declare response outside try block to access in catch
 
     try {
         console.log(`[fileUtils] Downloading file from URL: ${url}`);
-        const response = await axios({
+        response = await axios({ // Assign to outer scope variable
             url,
             method: 'GET',
             responseType: 'stream',
@@ -97,37 +103,70 @@ export async function downloadFile(url: string, outputDir: string, subfolder: st
         });
 
         if (response.status < 200 || response.status >= 300) {
-            throw new Error(`Download failed with status code ${response.status}`);
+            // Attempt to read error message from stream if possible
+            let errorBody = '';
+            // Check if response.data is an async iterable before trying to read it
+            if (isAsyncIterable(response.data)) {
+                try {
+                    for await (const chunk of response.data) {
+                        // Ensure chunk is converted to string appropriately
+                        errorBody += Buffer.isBuffer(chunk) ? chunk.toString('utf-8') : String(chunk);
+                    }
+                } catch (streamError) {
+                    console.warn('[fileUtils] Error reading error response stream:', streamError);
+                }
+            } else {
+                 errorBody = '(Could not read response body)';
+            }
+            throw new Error(`Download failed with status code ${response.status}. Response: ${errorBody}`);
         }
 
-        const contentType = response.headers['content-type'];
         let extension = '.tmp'; // Default extension
+        const contentType = response.headers['content-type'];
+        let contentTypeValid = false;
+
+        // 1. Try Content-Type Header
         if (contentType) {
-            // Basic extension detection from mime type
-            if (contentType.startsWith('image/png')) extension = '.png';
-            else if (contentType.startsWith('image/jpeg')) extension = '.jpg';
-            else if (contentType.startsWith('image/gif')) extension = '.gif';
-            else if (contentType.startsWith('image/webp')) extension = '.webp';
-            else if (contentType.startsWith('video/mp4')) extension = '.mp4';
-            else if (contentType.startsWith('video/webm')) extension = '.webm';
-            else if (contentType.startsWith('audio/mpeg')) extension = '.mp3';
-            else if (contentType.startsWith('audio/ogg')) extension = '.ogg';
-            else if (contentType.startsWith('audio/wav')) extension = '.wav';
-            // Add more types as needed
-            else {
-                const mimeParts = contentType.split('/');
-                if (mimeParts.length === 2) {
-                    extension = `.${mimeParts[1].split(';')[0]}`; // Get subtype, remove parameters like charset
+            const mainType = contentType.split(';')[0].trim();
+            const guessedExtension = mime.extension(mainType);
+            if (guessedExtension) {
+                if (!mainType.startsWith('application/') || mainType === 'application/pdf') {
+                     extension = `.${guessedExtension}`;
+                     contentTypeValid = true;
+                     console.log(`[fileUtils] Determined extension '${extension}' from Content-Type: ${contentType}`);
+                } else {
+                    console.warn(`[fileUtils] Content-Type '${contentType}' seems invalid for media, ignoring for extension.`);
                 }
+            } else {
+                 console.warn(`[fileUtils] Could not determine extension from Content-Type: ${contentType}`);
+            }
+        } else {
+             console.warn(`[fileUtils] Content-Type header missing in download response.`);
+        }
+
+        // 2. Try URL Path Extension (if Content-Type was invalid or missing)
+        if (!contentTypeValid) {
+            try {
+                const parsedUrl = new URL(url);
+                const pathExtension = path.extname(parsedUrl.pathname).toLowerCase();
+                if (pathExtension && pathExtension.length > 1) {
+                    extension = pathExtension;
+                    console.log(`[fileUtils] Determined extension '${extension}' from URL path.`);
+                } else {
+                     console.warn(`[fileUtils] No valid extension found in URL path: ${parsedUrl.pathname}. Falling back to '${extension}'.`);
+                }
+            } catch (urlParseError) {
+                 console.warn(`[fileUtils] Could not parse URL to extract path extension. Falling back to '${extension}'.`);
             }
         }
 
+
         // Generate unique name with determined extension
         finalFilePath = generateUniqueFilename(filenamePrefix, extension);
-        finalFilePath = path.join(fullDirPath, path.basename(finalFilePath)); // Ensure it's in the correct directory
+        finalFilePath = path.join(fullDirPath, path.basename(finalFilePath));
 
 
-        const writer = fsSync.createWriteStream(finalFilePath); // Use fsSync for createWriteStream
+        const writer = fsSync.createWriteStream(finalFilePath);
         const stream = response.data as Stream;
         stream.pipe(writer);
 
@@ -151,16 +190,18 @@ export async function downloadFile(url: string, outputDir: string, subfolder: st
         // Attempt cleanup if file was partially created
         if (finalFilePath) {
             await deleteFile(finalFilePath).catch(e => console.error(`[fileUtils] Error cleaning up file ${finalFilePath} after download error:`, e));
-        } else if (tempFilePath) {
-             // If final path wasn't determined, try cleaning up the initial temp path
-             await deleteFile(tempFilePath + '.tmp').catch(e => {}); // Try cleaning up potential fallback
         }
-        // Revert to less type-safe error checking
+        // Rethrow a more specific error
         const err = error as any;
         let errorMessage = `Download failed due to an unknown error.`;
-        if (err.response && err.message) {
+        // Check if it's the specific error we threw earlier with status code
+        if (error instanceof Error && error.message.startsWith('Download failed with status code')) {
+             errorMessage = error.message; // Use the message we constructed
+        } else if (err.response && err.message) { // Check for Axios-like errors
              errorMessage = `Download failed: ${err.message} (Status: ${err.response?.status})`;
-        } else if (err.message) {
+        } else if (error instanceof Error) { // Catch other standard Error instances
+             errorMessage = `Download failed: ${error.message}`;
+        } else if (err.message) { // Fallback for other error-like objects
              errorMessage = `Download failed: ${err.message}`;
         }
         throw new Error(errorMessage);
