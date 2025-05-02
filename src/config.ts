@@ -42,11 +42,3 @@ if (!GEMINI_API_KEY) {
     console.error('[gemini-integrator-mcp] Error: Gemini API key (GEMINI_API_KEY) is not configured.');
     // process.exit(1); // Consider exiting if the key is absolutely essential
 }
-
-// Log loaded config (optional, for debugging)
-// console.log('[gemini-integrator-mcp] Configuration loaded:');
-// console.log(` - GEMINI_API_URL: ${GEMINI_API_URL}`);
-// console.log(` - DEFAULT_OUTPUT_DIR: ${DEFAULT_OUTPUT_DIR}`);
-// console.log(` - REQUEST_TIMEOUT: ${REQUEST_TIMEOUT}ms`);
-// console.log(` - CF ImgBed Upload URL configured: ${!!CF_IMGBED_UPLOAD_URL}`);
-// console.log(` - CF ImgBed API Key configured: ${!!CF_IMGBED_API_KEY}`);

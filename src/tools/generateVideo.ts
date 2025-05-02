@@ -11,7 +11,7 @@ import { GEMINI_API_KEY, DEFAULT_OUTPUT_DIR, GEMINI_API_URL, REQUEST_TIMEOUT } f
 
 // Define the input schema for the generateVideo tool using Zod
 export const generateVideoSchema = z.object({
-    prompt: z.string().min(1, "Descriptive text prompt detailing the desired video content."),
+    prompt: z.string().min(1).describe("Descriptive text prompt detailing the desired video content."), // Moved description
     negativePrompt: z.string().optional().describe("Text prompt describing content to avoid in the video."),
     aspectRatio: z.enum(["16:9", "9:16", "1:1"]).optional().default("16:9").describe("Aspect ratio for the generated video."),
     personGeneration: z.enum(["dont_allow", "allow_adult"]).optional().default("dont_allow").describe("Control generation of people ('dont_allow', 'allow_adult')."),
@@ -85,17 +85,21 @@ export async function handleGenerateVideo(
         // --- 1. Initiate Async Video Generation ---
         // Adjust model name based on Gemini docs (e.g., 'veo-2.0-generate-001')
         const startApiUrl = `/v1beta/models/veo-2.0-generate-001:predictLongRunning?key=${GEMINI_API_KEY}`;
-        // Correct the payload structure based on the error message (remove 'instances' and 'parameters' nesting)
-        const startRequestPayload: any = { // Use 'any' temporarily for flexibility
-            prompt: prompt,
-            aspectRatio: aspectRatio,
-            personGeneration: personGeneration,
-            numberOfVideos: numberOfVideos,
-            durationSeconds: durationSeconds,
+        // Construct the payload according to the Gemini API specification (nesting required)
+        const startRequestPayload: any = {
+            instances: [{
+                prompt: prompt,
+            }],
+            parameters: {
+                aspectRatio: aspectRatio,
+                personGeneration: personGeneration,
+                numberOfVideos: numberOfVideos,
+                durationSeconds: durationSeconds,
+            }
         };
-        // Conditionally add negativePrompt if provided
+        // Conditionally add negativePrompt to the parameters object if provided
         if (negativePrompt) {
-            startRequestPayload.negativePrompt = negativePrompt;
+            startRequestPayload.parameters.negativePrompt = negativePrompt;
         }
 
 

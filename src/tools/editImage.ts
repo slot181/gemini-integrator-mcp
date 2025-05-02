@@ -15,9 +15,9 @@ import { GEMINI_API_KEY, DEFAULT_OUTPUT_DIR, REQUEST_TIMEOUT } from '../config.j
 
 // Define the base object schema first
 const editImageBaseSchema = z.object({
-    prompt: z.string().min(1, "Instructions for how to edit the provided image."),
-    image_url: z.string().url("URL of the image to edit.").optional(),
-    image_path: z.string().min(1, "Local path to the image to edit.").optional(),
+    prompt: z.string().min(1).describe("Instructions for how to edit the provided image."), // Moved description
+    image_url: z.string().url().optional().describe("URL of the image to edit."), // Moved description
+    image_path: z.string().min(1).optional().describe("Local path to the image to edit."), // Moved description
     // Add other potential Gemini parameters as needed
 });
 

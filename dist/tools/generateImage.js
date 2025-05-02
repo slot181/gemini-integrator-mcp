@@ -8,7 +8,7 @@ import { uploadToCfImgbed } from '../utils/cfUtils.js'; // Add .js extension
 import { GEMINI_API_KEY, DEFAULT_OUTPUT_DIR, GEMINI_IMAGE_GEN_MODEL } from '../config.js';
 // Define the input schema for the generateImage tool using Zod
 export const generateImageSchema = z.object({
-    prompt: z.string().min(1, "Descriptive text prompt for image generation."),
+    prompt: z.string().min(1).describe("Descriptive text prompt for image generation."), // Moved description to .describe()
     // Add aspectRatio as it's used by imagen-3.0
     aspectRatio: z.enum(["1:1", "3:4", "4:3", "9:16", "16:9"]).optional().default("1:1").describe("Aspect ratio for the generated image (ignored by gemini-2.0 model)."),
 });
@@ -60,8 +60,6 @@ export async function handleGenerateImage(params, axiosInstance // Use 'any' for
         let imagePart = null;
         if (selectedModel === 'imagen-3.0-generate-002') {
             // Adjust response parsing for Imagen 3's 'predict' endpoint structure
-            // This structure needs verification based on actual API response
-            // Assuming it might be in response.data.predictions[0].bytesBase64Encoded or similar
             const prediction = response.data?.predictions?.[0];
             if (prediction?.bytesBase64Encoded && prediction?.mimeType?.startsWith('image/')) {
                 imagePart = {
