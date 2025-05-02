@@ -26,6 +26,8 @@ export const GEMINI_API_KEY = cliArgs.GEMINI_API_KEY || process.env.GEMINI_API_K
 export const GEMINI_API_URL = cliArgs.GEMINI_API_URL || process.env.GEMINI_API_URL || 'https://generativelanguage.googleapis.com';
 // Add model selection for image generation
 export const GEMINI_IMAGE_GEN_MODEL = cliArgs.GEMINI_IMAGE_GEN_MODEL || process.env.GEMINI_IMAGE_GEN_MODEL || 'gemini-2.0-flash-exp-image-generation'; // Default model
+// Add model selection for media understanding
+export const GEMINI_UNDERSTANDING_MODEL = cliArgs.GEMINI_UNDERSTANDING_MODEL || process.env.GEMINI_UNDERSTANDING_MODEL || 'gemini-1.5-flash-latest'; // Default model
 
 // --- Cloudflare ImgBed Configuration ---
 export const CF_IMGBED_UPLOAD_URL = cliArgs.CF_IMGBED_UPLOAD_URL || process.env.CF_IMGBED_UPLOAD_URL;

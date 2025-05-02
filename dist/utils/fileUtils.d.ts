@@ -12,7 +12,7 @@ export declare function saveFile(outputDir: string, subfolder: string, filename:
 /**
  * Generates a unique filename, typically using a timestamp and a random suffix.
  * @param prefix A prefix for the filename (e.g., 'image', 'video', 'edit').
- * @param extension The file extension (e.g., '.png', '.mp4').
+ * @param extension The file extension including the dot (e.g., '.png', '.mp4').
  * @returns A unique filename string.
  */
 export declare function generateUniqueFilename(prefix: string, extension: string): string;
@@ -21,3 +21,15 @@ export declare function generateUniqueFilename(prefix: string, extension: string
  * @param filePath The path to the file to delete.
  */
 export declare function deleteFile(filePath: string): Promise<void>;
+/**
+ * Downloads a file from a URL to a specified directory.
+ * Generates a unique filename based on prefix and detected/fallback extension.
+ *
+ * @param url The URL of the file to download.
+ * @param outputDir The base directory to save the downloaded file.
+ * @param subfolder The subfolder within the output directory.
+ * @param filenamePrefix Prefix for the generated unique filename.
+ * @returns The full path to the downloaded file.
+ * @throws If download fails or the response is not a success status.
+ */
+export declare function downloadFile(url: string, outputDir: string, subfolder: string, filenamePrefix: string): Promise<string>;

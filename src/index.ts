@@ -4,22 +4,23 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import axios from 'axios'; // Remove AxiosInstance import
 import { z } from 'zod'; // Import Zod for schema validation
 
-// Import configuration variables
+// Import configuration variables (removed unused ones)
 import {
     GEMINI_API_KEY,
     GEMINI_API_URL,
-    DEFAULT_OUTPUT_DIR,
-    CF_IMGBED_UPLOAD_URL, // Corrected import
-    CF_IMGBED_API_KEY,   // Corrected import
+    // DEFAULT_OUTPUT_DIR, // Not used in index.ts
+    // CF_IMGBED_UPLOAD_URL, // Not used in index.ts
+    // CF_IMGBED_API_KEY,   // Not used in index.ts
     REQUEST_TIMEOUT
 } from './config.js'; // Add .js extension
 // Note: CF_ACCOUNT_ID and CF_PUBLIC_URL_BASE were removed from config.ts, so removed here too.
 
 // --- Tool Schemas and Handlers ---
-import { generateImageSchema, handleGenerateImage } from './tools/generateImage.js'; // Add .js extension
-// Import the exported shape for the refined schema
-import { editImageSchema, editImageShape, handleEditImage } from './tools/editImage.js'; // Add .js extension
-import { generateVideoSchema, handleGenerateVideo } from './tools/generateVideo.js'; // Add .js extension
+// Import only the shape and handler for each tool
+import { generateImageSchema, handleGenerateImage } from './tools/generateImage.js';
+import { editImageShape, handleEditImage } from './tools/editImage.js';
+import { generateVideoSchema, handleGenerateVideo } from './tools/generateVideo.js';
+import { understandMediaShape, handleUnderstandMedia } from './tools/understandMedia.js';
 
 // --- Initialization ---
 
@@ -48,7 +49,7 @@ const axiosInstance = axios.create({ // Remove explicit type annotation
 // Create the MCP Server instance
 const server = new McpServer({
     name: 'gemini-integrator-mcp',
-    version: '1.0.3' // Initial version
+    version: '1.0.4' // Initial version
 });
 
 // --- Tool Registration ---
@@ -64,8 +65,7 @@ server.tool(
 // Register the gemini_edit_image tool
 server.tool(
     'gemini_edit_image',
-    editImageShape, // Use the explicitly exported shape for refined schema
-    // Remove 'any'
+    editImageShape, // Use the explicitly exported shape
     (validatedParams, extra) => handleEditImage(validatedParams, axiosInstance)
 );
 
@@ -73,8 +73,14 @@ server.tool(
 server.tool(
     'gemini_generate_video',
     generateVideoSchema.shape, // Use .shape for basic object schema
-    // Remove 'any'
     (validatedParams, extra) => handleGenerateVideo(validatedParams, axiosInstance)
+);
+
+// Register the gemini_understand_media tool
+server.tool(
+    'gemini_understand_media',
+    understandMediaShape, // Use the exported base shape for registration
+    (validatedParams, extra) => handleUnderstandMedia(validatedParams, axiosInstance)
 );
 
 
