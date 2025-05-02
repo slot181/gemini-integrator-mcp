@@ -4,7 +4,7 @@ import * as fs from 'fs/promises'; // Needed to read file for upload
 import * as path from 'path';
 
 // Import necessary configuration
-import { CF_IMGBED_UPLOAD_URL, CF_IMGBED_API_KEY, REQUEST_TIMEOUT } from '../config'; // Adjust path to config
+import { CF_IMGBED_UPLOAD_URL, CF_IMGBED_API_KEY, REQUEST_TIMEOUT } from '../config.js'; // Add .js extension
 
 /**
  * Uploads a file (image or video) from a local path to Cloudflare ImgBed.

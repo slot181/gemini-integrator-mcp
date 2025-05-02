@@ -12,14 +12,14 @@ import {
     CF_IMGBED_UPLOAD_URL, // Corrected import
     CF_IMGBED_API_KEY,   // Corrected import
     REQUEST_TIMEOUT
-} from './config';
+} from './config.js'; // Add .js extension
 // Note: CF_ACCOUNT_ID and CF_PUBLIC_URL_BASE were removed from config.ts, so removed here too.
 
 // --- Tool Schemas and Handlers ---
-import { generateImageSchema, handleGenerateImage } from './tools/generateImage';
+import { generateImageSchema, handleGenerateImage } from './tools/generateImage.js'; // Add .js extension
 // Import the exported shape for the refined schema
-import { editImageSchema, editImageShape, handleEditImage } from './tools/editImage';
-import { generateVideoSchema, handleGenerateVideo } from './tools/generateVideo';
+import { editImageSchema, editImageShape, handleEditImage } from './tools/editImage.js'; // Add .js extension
+import { generateVideoSchema, handleGenerateVideo } from './tools/generateVideo.js'; // Add .js extension
 
 // --- Initialization ---
 
@@ -48,7 +48,7 @@ const axiosInstance = axios.create({ // Remove explicit type annotation
 // Create the MCP Server instance
 const server = new McpServer({
     name: 'gemini-integrator-mcp',
-    version: '1.0.0' // Initial version
+    version: '1.0.1' // Initial version
 });
 
 // --- Tool Registration ---

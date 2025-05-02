@@ -1,50 +1,13 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateImageSchema = void 0;
-exports.handleGenerateImage = handleGenerateImage;
-const zod_1 = require("zod");
+import { z } from 'zod';
 // Remove AxiosInstance and AxiosError type imports
-const path = __importStar(require("path"));
+import * as path from 'path';
 // Import shared utilities and config
-const fileUtils_1 = require("../utils/fileUtils");
-const cfUtils_1 = require("../utils/cfUtils");
-const config_1 = require("../config");
+import { saveFile, generateUniqueFilename } from '../utils/fileUtils.js'; // Add .js extension
+import { uploadToCfImgbed } from '../utils/cfUtils.js'; // Add .js extension
+import { GEMINI_API_KEY, DEFAULT_OUTPUT_DIR } from '../config.js'; // Add .js extension
 // Define the input schema for the generateImage tool using Zod
-exports.generateImageSchema = zod_1.z.object({
-    prompt: zod_1.z.string().min(1, "Prompt cannot be empty"),
+export const generateImageSchema = z.object({
+    prompt: z.string().min(1, "Prompt cannot be empty"),
     // Add other potential Gemini parameters as needed (optional)
     // e.g., negative_prompt: z.string().optional(),
     // e.g., style_raw: z.string().optional(),
@@ -55,17 +18,17 @@ exports.generateImageSchema = zod_1.z.object({
  * Calls the Gemini API, saves the image locally, uploads to CF ImgBed if configured,
  * and returns the results.
  */
-async function handleGenerateImage(params, axiosInstance // Use 'any' for now to bypass the type issue
+export async function handleGenerateImage(params, axiosInstance // Use 'any' for now to bypass the type issue
 // Update return signature to only use TextContent
 ) {
     const { prompt } = params;
-    const imageOutputDir = path.join(config_1.DEFAULT_OUTPUT_DIR, 'image'); // Specific subfolder for generated images
+    const imageOutputDir = path.join(DEFAULT_OUTPUT_DIR, 'image'); // Specific subfolder for generated images
     try {
         console.log(`[generateImage] Received request with prompt: "${prompt}"`);
         // Construct the API URL with the API key
         // Adjust the model name as needed (e.g., 'gemini-pro-vision', 'gemini-1.5-flash', etc.)
         // The example uses 'gemini-2.0-flash-exp-image-generation'
-        const apiUrl = `/v1beta/models/gemini-2.0-flash-exp-image-generation:generateContent?key=${config_1.GEMINI_API_KEY}`;
+        const apiUrl = `/v1beta/models/gemini-2.0-flash-exp-image-generation:generateContent?key=${GEMINI_API_KEY}`;
         // Construct the request payload based on Gemini API docs
         const requestPayload = {
             contents: [{
@@ -93,14 +56,14 @@ async function handleGenerateImage(params, axiosInstance // Use 'any' for now to
         const fileExtension = mimeType.split('/')[1] || 'png'; // Default to png if split fails
         const imageData = Buffer.from(base64Data, 'base64');
         // --- Save Locally ---
-        const uniqueFilename = (0, fileUtils_1.generateUniqueFilename)('gemini-gen', `.${fileExtension}`);
-        const localImagePath = await (0, fileUtils_1.saveFile)(config_1.DEFAULT_OUTPUT_DIR, 'image', uniqueFilename, imageData);
+        const uniqueFilename = generateUniqueFilename('gemini-gen', `.${fileExtension}`);
+        const localImagePath = await saveFile(DEFAULT_OUTPUT_DIR, 'image', uniqueFilename, imageData);
         console.log(`[generateImage] Image saved locally to: ${localImagePath}`);
         // --- Upload to CF ImgBed (if configured) ---
         let cfImageUrl = null;
         let cfUploadSuccess = false;
         try {
-            cfImageUrl = await (0, cfUtils_1.uploadToCfImgbed)(localImagePath);
+            cfImageUrl = await uploadToCfImgbed(localImagePath);
             cfUploadSuccess = !!cfImageUrl;
         }
         catch (uploadError) {

@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
-    "target": "ES2020", // 目标 JavaScript 版本
-    "module": "CommonJS", // 使用 CommonJS 模块系统
+    "target": "ES2022", // Use a recent ES target
+    "module": "NodeNext", // Output ES modules compatible with Node.js
     "outDir": "./dist", // 编译输出目录
     "rootDir": "./src", // 源代码根目录
     "strict": true, // 启用所有严格类型检查选项
@@ -9,7 +9,7 @@
     "skipLibCheck": true, // 跳过声明文件的类型检查
     "forceConsistentCasingInFileNames": true, // 强制文件名大小写一致
     "resolveJsonModule": true, // 允许导入 JSON 文件
-    "moduleResolution": "node", // 模块解析策略
+    "moduleResolution": "NodeNext", // Use NodeNext resolution for ESM
     "declaration": true, // 生成 .d.ts 文件
     "sourceMap": true // 生成 source map 文件
   },

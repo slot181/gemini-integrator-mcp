@@ -9,9 +9,9 @@ import { Stream } from 'stream'; // For download stream typing
 import type { TextContent } from '@modelcontextprotocol/sdk/types.js'; // Use TextContent
 
 // Import shared utilities and config
-import { saveFile, generateUniqueFilename, deleteFile } from '../utils/fileUtils';
-import { uploadToCfImgbed } from '../utils/cfUtils';
-import { GEMINI_API_KEY, DEFAULT_OUTPUT_DIR, REQUEST_TIMEOUT } from '../config';
+import { saveFile, generateUniqueFilename, deleteFile } from '../utils/fileUtils.js'; // Add .js extension
+import { uploadToCfImgbed } from '../utils/cfUtils.js'; // Add .js extension
+import { GEMINI_API_KEY, DEFAULT_OUTPUT_DIR, REQUEST_TIMEOUT } from '../config.js'; // Add .js extension
 
 // Define the base object schema first
 const editImageBaseSchema = z.object({

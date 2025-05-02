@@ -6,9 +6,9 @@ import * as fs from 'fs/promises'; // Needed for Buffer operations
 import type { TextContent } from '@modelcontextprotocol/sdk/types.js'; // Use TextContent, remove JsonContentPart
 
 // Import shared utilities and config
-import { saveFile, generateUniqueFilename } from '../utils/fileUtils';
-import { uploadToCfImgbed } from '../utils/cfUtils';
-import { GEMINI_API_KEY, DEFAULT_OUTPUT_DIR } from '../config';
+import { saveFile, generateUniqueFilename } from '../utils/fileUtils.js'; // Add .js extension
+import { uploadToCfImgbed } from '../utils/cfUtils.js'; // Add .js extension
+import { GEMINI_API_KEY, DEFAULT_OUTPUT_DIR } from '../config.js'; // Add .js extension
 
 // Define the input schema for the generateImage tool using Zod
 export const generateImageSchema = z.object({

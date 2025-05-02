@@ -1,55 +1,15 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateVideoSchema = void 0;
-exports.handleGenerateVideo = handleGenerateVideo;
-const zod_1 = require("zod");
-const axios_1 = __importDefault(require("axios")); // Keep default import
-const path = __importStar(require("path"));
+import { z } from 'zod';
+import axios from 'axios'; // Keep default import
+import * as path from 'path';
 // Import shared utilities and config
-const fileUtils_1 = require("../utils/fileUtils");
-const cfUtils_1 = require("../utils/cfUtils");
-const config_1 = require("../config"); // Added REQUEST_TIMEOUT import
+import { saveFile, generateUniqueFilename } from '../utils/fileUtils.js'; // Add .js extension
+import { uploadToCfImgbed } from '../utils/cfUtils.js'; // Add .js extension
+import { GEMINI_API_KEY, DEFAULT_OUTPUT_DIR, GEMINI_API_URL, REQUEST_TIMEOUT } from '../config.js'; // Add .js extension
 // Define the input schema for the generateVideo tool using Zod
-exports.generateVideoSchema = zod_1.z.object({
-    prompt: zod_1.z.string().min(1, "Prompt cannot be empty"),
-    aspectRatio: zod_1.z.enum(["16:9", "9:16", "1:1"]).optional().default("16:9"), // Example parameter
-    personGeneration: zod_1.z.enum(["allow", "dont_allow"]).optional().default("dont_allow"), // Example parameter
+export const generateVideoSchema = z.object({
+    prompt: z.string().min(1, "Prompt cannot be empty"),
+    aspectRatio: z.enum(["16:9", "9:16", "1:1"]).optional().default("16:9"), // Example parameter
+    personGeneration: z.enum(["allow", "dont_allow"]).optional().default("dont_allow"), // Example parameter
     // Add other potential video parameters
 });
 // Helper function to delay execution
@@ -62,15 +22,15 @@ const MAX_POLLING_ATTEMPTS = 360; // Max attempts (e.g., 360 * 10s = 1 hour time
  * Initiates async generation, polls for completion, saves the video locally,
  * uploads to CF ImgBed if configured, and returns the results.
  */
-async function handleGenerateVideo(params, axiosInstance // Use 'any' to bypass Axios type issues
+export async function handleGenerateVideo(params, axiosInstance // Use 'any' to bypass Axios type issues
 ) {
     const { prompt, aspectRatio, personGeneration } = params;
-    const videoOutputDir = path.join(config_1.DEFAULT_OUTPUT_DIR, 'video'); // Specific subfolder
+    const videoOutputDir = path.join(DEFAULT_OUTPUT_DIR, 'video'); // Specific subfolder
     try {
         console.log(`[generateVideo] Received request with prompt: "${prompt}"`);
         // --- 1. Initiate Async Video Generation ---
         // Adjust model name based on Gemini docs (e.g., 'veo-2.0-generate-001')
-        const startApiUrl = `/v1beta/models/veo-2.0-generate-001:predictLongRunning?key=${config_1.GEMINI_API_KEY}`;
+        const startApiUrl = `/v1beta/models/veo-2.0-generate-001:predictLongRunning?key=${GEMINI_API_KEY}`;
         const startRequestPayload = {
             instances: [{ prompt }],
             parameters: {
@@ -91,13 +51,13 @@ async function handleGenerateVideo(params, axiosInstance // Use 'any' to bypass 
         // --- 2. Poll for Task Completion ---
         let attempts = 0;
         let operationStatus = null;
-        const operationStatusUrl = `${config_1.GEMINI_API_URL}/v1beta/${operationName}?key=${config_1.GEMINI_API_KEY}`; // Construct polling URL
+        const operationStatusUrl = `${GEMINI_API_URL}/v1beta/${operationName}?key=${GEMINI_API_KEY}`; // Construct polling URL
         while (attempts < MAX_POLLING_ATTEMPTS) {
             attempts++;
             console.log(`[generateVideo] Polling status for ${operationName} (Attempt ${attempts}/${MAX_POLLING_ATTEMPTS})... URL: ${operationStatusUrl}`);
             try {
                 // Use a direct axios call for polling as it might have different base URL/auth needs if operation URL is absolute
-                const pollResponse = await axios_1.default.get(operationStatusUrl, { timeout: config_1.REQUEST_TIMEOUT }); // Use configured timeout
+                const pollResponse = await axios.get(operationStatusUrl, { timeout: REQUEST_TIMEOUT }); // Use configured timeout
                 operationStatus = pollResponse.data;
                 if (operationStatus?.done) {
                     console.log(`[generateVideo] Operation ${operationName} completed.`);
@@ -150,7 +110,7 @@ async function handleGenerateVideo(params, axiosInstance // Use 'any' to bypass 
             console.log(`[generateVideo] Found video URI: ${videoUri}. Attempting download...`);
             try {
                 // This might require authenticated download depending on the URI type
-                const downloadResponse = await axios_1.default.get(videoUri, { responseType: 'arraybuffer', timeout: config_1.REQUEST_TIMEOUT * 2 }); // Longer timeout for download
+                const downloadResponse = await axios.get(videoUri, { responseType: 'arraybuffer', timeout: REQUEST_TIMEOUT * 2 }); // Longer timeout for download
                 // Explicitly cast data to ArrayBuffer before passing to Buffer.from
                 videoData = Buffer.from(downloadResponse.data);
                 // Try to get extension from URI
@@ -169,7 +129,7 @@ async function handleGenerateVideo(params, axiosInstance // Use 'any' to bypass 
             const videoUri = operationStatus.response.videoUri;
             console.log(`[generateVideo] Found direct video URI: ${videoUri}. Attempting download...`);
             try {
-                const downloadResponse = await axios_1.default.get(videoUri, { responseType: 'arraybuffer', timeout: config_1.REQUEST_TIMEOUT * 2 });
+                const downloadResponse = await axios.get(videoUri, { responseType: 'arraybuffer', timeout: REQUEST_TIMEOUT * 2 });
                 // Explicitly cast data to ArrayBuffer before passing to Buffer.from
                 videoData = Buffer.from(downloadResponse.data);
                 const uriPath = new URL(videoUri).pathname;
@@ -187,14 +147,14 @@ async function handleGenerateVideo(params, axiosInstance // Use 'any' to bypass 
             throw new Error('Video generation succeeded but no video data could be extracted.');
         }
         // --- 4. Save Locally ---
-        const uniqueFilename = (0, fileUtils_1.generateUniqueFilename)('gemini-vid', `.${fileExtension}`);
-        const localVideoPath = await (0, fileUtils_1.saveFile)(config_1.DEFAULT_OUTPUT_DIR, 'video', uniqueFilename, videoData);
+        const uniqueFilename = generateUniqueFilename('gemini-vid', `.${fileExtension}`);
+        const localVideoPath = await saveFile(DEFAULT_OUTPUT_DIR, 'video', uniqueFilename, videoData);
         console.log(`[generateVideo] Video saved locally to: ${localVideoPath}`);
         // --- 5. Upload to CF ImgBed (if configured) ---
         let cfVideoUrl = null;
         let cfUploadSuccess = false;
         try {
-            cfVideoUrl = await (0, cfUtils_1.uploadToCfImgbed)(localVideoPath);
+            cfVideoUrl = await uploadToCfImgbed(localVideoPath);
             cfUploadSuccess = !!cfVideoUrl;
         }
         catch (uploadError) {

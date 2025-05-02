@@ -5,9 +5,9 @@ import * as fs from 'fs/promises';
 import type { TextContent } from '@modelcontextprotocol/sdk/types.js'; // Use TextContent
 
 // Import shared utilities and config
-import { saveFile, generateUniqueFilename } from '../utils/fileUtils';
-import { uploadToCfImgbed } from '../utils/cfUtils';
-import { GEMINI_API_KEY, DEFAULT_OUTPUT_DIR, GEMINI_API_URL, REQUEST_TIMEOUT } from '../config'; // Added REQUEST_TIMEOUT import
+import { saveFile, generateUniqueFilename } from '../utils/fileUtils.js'; // Add .js extension
+import { uploadToCfImgbed } from '../utils/cfUtils.js'; // Add .js extension
+import { GEMINI_API_KEY, DEFAULT_OUTPUT_DIR, GEMINI_API_URL, REQUEST_TIMEOUT } from '../config.js'; // Add .js extension
 
 // Define the input schema for the generateVideo tool using Zod
 export const generateVideoSchema = z.object({
