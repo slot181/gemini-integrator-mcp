@@ -11,8 +11,9 @@ export const generateVideoSchema = z.object({
     negativePrompt: z.string().optional().describe("Text prompt describing content to avoid in the video."),
     aspectRatio: z.enum(["16:9", "9:16", "1:1"]).optional().default("16:9").describe("Aspect ratio for the generated video."),
     personGeneration: z.enum(["dont_allow", "allow_adult"]).optional().default("dont_allow").describe("Control generation of people ('dont_allow', 'allow_adult')."),
-    numberOfVideos: z.number().int().min(1).max(2).optional().default(1).describe("Number of videos to generate (1 or 2)."),
+    // numberOfVideos: z.number().int().min(1).max(2).optional().default(1).describe("Number of videos to generate (1 or 2)."), // Removed numberOfVideos
     durationSeconds: z.number().int().min(5).max(8).optional().default(5).describe("Duration of each video in seconds (5-8)."),
+    enhance_prompt: z.boolean().optional().default(true).describe("Enable or disable the prompt enhancer. Defaults to enabled (true)."), // Added enhance_prompt
 });
 // Helper function to delay execution
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -26,7 +27,8 @@ const MAX_POLLING_ATTEMPTS = 360; // Max attempts (e.g., 360 * 10s = 1 hour time
  */
 export async function handleGenerateVideo(params, axiosInstance // Use 'any' to bypass Axios type issues
 ) {
-    const { prompt, aspectRatio, personGeneration, negativePrompt, numberOfVideos, durationSeconds } = params; // Include new params
+    // Destructure new/removed params
+    const { prompt, aspectRatio, personGeneration, negativePrompt, durationSeconds, enhance_prompt } = params;
     const videoOutputDir = path.join(DEFAULT_OUTPUT_DIR, 'video'); // Specific subfolder
     try {
         console.log(`[generateVideo] Received request with prompt: "${prompt}"`);
@@ -41,8 +43,9 @@ export async function handleGenerateVideo(params, axiosInstance // Use 'any' to 
             parameters: {
                 aspectRatio: aspectRatio,
                 personGeneration: personGeneration,
-                numberOfVideos: numberOfVideos,
+                // numberOfVideos: numberOfVideos, // Removed
                 durationSeconds: durationSeconds,
+                enhance_prompt: enhance_prompt, // Added
             }
         };
         // Conditionally add negativePrompt to the parameters object if provided

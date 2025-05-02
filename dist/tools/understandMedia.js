@@ -8,21 +8,33 @@ import { deleteFile, downloadFile } from '../utils/fileUtils.js';
 // --- Helper function to delay execution ---
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // --- Polling Configuration ---
-const FILE_POLLING_INTERVAL_MS = 2000; // Check every 2 seconds
-const MAX_FILE_POLLING_ATTEMPTS = 24; // Max attempts (e.g., 36 * 5s = 3 minutes timeout)
+const FILE_POLLING_INTERVAL_MS = 5000; // Check every 5 seconds
+const MAX_FILE_POLLING_ATTEMPTS = 36; // Max attempts (e.g., 36 * 5s = 3 minutes timeout)
 // Schema for a single file source (URL or Path)
 const fileSourceSchema = z.object({
     url: z.string().url().optional().describe("URL of the file (image, video, audio, pdf, text, code)."),
     path: z.string().optional().describe("Local path to the file (image, video, audio, pdf, text, code)."),
-}).refine(data => !!data.url !== !!data.path, {
-    message: "Provide either 'url' or 'path' for each file, but not both.",
+    // Added file_uri as an alternative input
+    file_uri: z.string().regex(/^files\/[a-zA-Z0-9]+$/, "file_uri must be in the format 'files/xxxxxx'").optional()
+        .describe("Optional. Pre-uploaded file URI (e.g., 'files/xxxxxx'). If provided, 'url' and 'path' for this file object will be ignored."),
+    // Added mime_type, required only if file_uri is provided
+    mime_type: z.string().optional()
+        .describe("Required only if 'file_uri' is provided. The MIME type of the pre-uploaded file (e.g., 'video/mp4', 'application/pdf')."),
+}).refine(data => {
+    const sources = [data.url, data.path, data.file_uri].filter(Boolean).length;
+    if (sources !== 1)
+        return false; // Exactly one source must be provided
+    if (data.file_uri && !data.mime_type)
+        return false; // mime_type is required if file_uri is used
+    return true;
+}, {
+    message: "For each file, provide exactly one of 'url', 'path', or 'file_uri'. If 'file_uri' is provided, 'mime_type' is also required.",
 });
 // Define the base object schema first, accepting an array of files
 const understandMediaBaseSchema = z.object({
-    // Updated description for 'text'
     text: z.string().min(1).describe("Required. The specific question or instruction for the AI model about the content of the provided file(s). E.g., 'Summarize this document', 'Describe this image', 'Transcribe this audio'. This field must contain the textual prompt."),
     // Updated description for 'files'
-    files: z.array(fileSourceSchema).min(1).describe("Required. An array containing one or more file objects. Each object *must* specify either a 'url' or a 'path' key pointing to a supported file (image, video, audio, PDF, text, code). Example: [{path: '/path/to/report.pdf'}, {url: 'https://example.com/image.png'}]"),
+    files: z.array(fileSourceSchema).min(1).describe("Required. An array containing one or more file objects. Each object *must* specify either a 'url', 'path', or ('file_uri' and 'mime_type') key pointing to a supported file. Example: [{path: '/path/to/report.pdf'}, {url: '...'}, {file_uri: 'files/abcde', mime_type: 'image/png'}]"),
 });
 // Refined schema (though base shape is used for registration)
 export const understandMediaSchema = understandMediaBaseSchema; // No top-level refine needed now
@@ -33,7 +45,7 @@ const SUPPORTED_MIME_TYPES = new Set([
     // Video
     'video/mp4', 'video/mpeg', 'video/mov', 'video/avi', 'video/x-flv',
     'video/mpg', 'video/webm', 'video/wmv', 'video/3gpp',
-    // Audio (Removed audio/mpeg, keeping audio/mp3)
+    // Audio
     'audio/wav', 'audio/mp3',
     'audio/aiff', 'audio/aac', 'audio/ogg', 'audio/flac',
     // Image
@@ -121,7 +133,7 @@ async function uploadFileToGoogleApi(filePath, mimeType, displayName) {
         }
         const { name, uri } = uploadResponse.data.file;
         console.log(`[uploadFileToGoogleApi] File uploaded successfully. Name: ${name}, URI: ${uri}`);
-        return { name, uri }; // Return both name and uri
+        return { name, uri };
     }
     catch (error) {
         const err = error;
@@ -145,7 +157,7 @@ async function uploadFileToGoogleApi(filePath, mimeType, displayName) {
  */
 async function pollFileStatus(fileName) {
     console.log(`[pollFileStatus] Starting polling for file: ${fileName}`);
-    const getFileUrl = `${GEMINI_API_URL}/v1beta/${fileName}?key=${GEMINI_API_KEY}`; // Use GEMINI_API_URL base
+    const getFileUrl = `${GEMINI_API_URL}/v1beta/${fileName}?key=${GEMINI_API_KEY}`;
     let attempts = 0;
     while (attempts < MAX_FILE_POLLING_ATTEMPTS) {
         attempts++;
@@ -156,44 +168,48 @@ async function pollFileStatus(fileName) {
             console.log(`[pollFileStatus] File ${fileName} state: ${fileState}`);
             if (fileState === 'ACTIVE') {
                 console.log(`[pollFileStatus] File ${fileName} is ACTIVE.`);
-                return; // Success
+                return;
             }
             else if (fileState === 'FAILED') {
                 console.error(`[pollFileStatus] File ${fileName} processing failed. Response:`, response.data);
                 throw new Error(`Processing failed for file ${fileName}.`);
             }
-            // Continue polling if state is PROCESSING or unspecified/null
         }
         catch (pollError) {
             const err = pollError;
-            // Log polling error but continue polling unless max attempts reached
             console.error(`[pollFileStatus] Error polling status for ${fileName}:`, err.response?.data || err.message || pollError);
-            // Optional: Implement backoff strategy here if needed
         }
         if (attempts >= MAX_FILE_POLLING_ATTEMPTS) {
             console.error(`[pollFileStatus] Polling timed out for file ${fileName} after ${MAX_FILE_POLLING_ATTEMPTS} attempts.`);
             throw new Error(`Polling timed out for file ${fileName}. It did not become ACTIVE.`);
         }
-        await delay(FILE_POLLING_INTERVAL_MS); // Wait before next poll
+        await delay(FILE_POLLING_INTERVAL_MS);
     }
 }
 /**
  * Handles the media understanding tool request for multiple files.
  */
-export async function handleUnderstandMedia(params, axiosInstance // Use 'any' type like other tools
-) {
+export async function handleUnderstandMedia(params, axiosInstance) {
     const { text, files } = params;
     const tempSubDir = 'tmp';
     const processedFiles = [];
     const cleanupPaths = [];
+    const filesToPoll = [];
     try {
         console.log(`[understandMedia] Received request with text: "${text}" and ${files.length} file(s).`);
-        // --- 1. Process and Upload each file input ---
-        const uploadPromises = files.map(async (fileSource) => {
-            let localFilePath = null;
-            let isTemp = false;
-            const originalSource = fileSource.url || fileSource.path || 'unknown';
-            try {
+        // --- 1. Process each file input ---
+        const processingPromises = files.map(async (fileSource) => {
+            const originalSource = fileSource.url || fileSource.path || fileSource.file_uri || 'unknown';
+            let fileUri = fileSource.file_uri;
+            let mimeType = fileSource.mime_type;
+            let fileName;
+            if (fileUri && mimeType) {
+                console.log(`[understandMedia] Using pre-uploaded file URI: ${fileUri} with MIME type: ${mimeType}`);
+                // Assume pre-uploaded files are ACTIVE or let Gemini handle the state check. No polling needed here.
+            }
+            else if (fileSource.url || fileSource.path) {
+                let localFilePath = null;
+                let isTemp = false;
                 if (fileSource.url) {
                     console.log(`[understandMedia] Downloading media from URL: ${fileSource.url}`);
                     localFilePath = await downloadFile(fileSource.url, DEFAULT_OUTPUT_DIR, tempSubDir, 'downloaded_media');
@@ -208,51 +224,56 @@ export async function handleUnderstandMedia(params, axiosInstance // Use 'any' t
                 }
                 if (!localFilePath)
                     throw new Error(`Invalid file source object: ${JSON.stringify(fileSource)}`);
-                let mimeType = mime.lookup(localFilePath);
-                if (!mimeType)
+                // Handle potential 'false' return from mime.lookup
+                const lookupResult = mime.lookup(localFilePath);
+                mimeType = lookupResult === false ? undefined : lookupResult; // Assign undefined if false
+                if (!mimeType) {
+                    if (isTemp)
+                        await deleteFile(localFilePath).catch(e => console.error(`[understandMedia] Error cleaning up temp file ${localFilePath} after MIME type failure:`, e));
                     throw new Error(`Could not determine MIME type for file: ${localFilePath}`);
+                }
                 const fileExt = path.extname(localFilePath).toLowerCase();
                 if (fileExt === '.mp3' && mimeType === 'audio/mpeg') {
                     console.log(`[understandMedia] Correcting MIME type for .mp3 file from 'audio/mpeg' to 'audio/mp3'.`);
                     mimeType = 'audio/mp3';
                 }
-                if (!SUPPORTED_MIME_TYPES.has(mimeType)) {
-                    throw new Error(`Unsupported file type '${mimeType}' for file: ${localFilePath}.`);
-                }
-                console.log(`[understandMedia] Validated MIME type: ${mimeType} for ${localFilePath}`);
+                // Upload the file
                 const displayName = path.basename(localFilePath);
-                const { name, uri } = await uploadFileToGoogleApi(localFilePath, mimeType, displayName); // Get name and uri
-                return { name, uri, mimeType, originalSource }; // Return ProcessedFileInfo structure
+                const uploadResult = await uploadFileToGoogleApi(localFilePath, mimeType, displayName);
+                fileUri = uploadResult.uri;
+                fileName = uploadResult.name;
+                filesToPoll.push(fileName);
             }
-            catch (error) {
-                // Clean up temp file if download/processing failed for this specific file
-                if (isTemp && localFilePath) {
-                    await deleteFile(localFilePath).catch(e => console.error(`[understandMedia] Error cleaning up temp file ${localFilePath} after error:`, e));
-                    // Remove from cleanupPaths if we delete it here
-                    const index = cleanupPaths.indexOf(localFilePath);
-                    if (index > -1)
-                        cleanupPaths.splice(index, 1);
-                }
-                console.error(`[understandMedia] Failed to process file source ${originalSource}:`, error);
-                // Re-throw to stop processing if one file fails? Or collect errors? Let's re-throw for now.
-                throw new Error(`Failed to process file ${originalSource}: ${error instanceof Error ? error.message : String(error)}`);
+            else {
+                throw new Error(`Invalid file source object, missing url, path, or file_uri/mime_type: ${JSON.stringify(fileSource)}`);
             }
-        });
-        // Wait for all uploads to complete
-        const uploadResults = await Promise.all(uploadPromises);
-        processedFiles.push(...uploadResults); // Add successful results
+            // Validate MIME type *after* potential correction and before adding
+            if (!mimeType || !SUPPORTED_MIME_TYPES.has(mimeType)) {
+                throw new Error(`Unsupported file type '${mimeType || 'unknown'}' for source: ${originalSource}.`);
+            }
+            console.log(`[understandMedia] Validated MIME type: ${mimeType} for source: ${originalSource}`);
+            if (!fileUri) {
+                throw new Error(`Failed to obtain file URI for source: ${originalSource}`);
+            }
+            processedFiles.push({ name: fileName, uri: fileUri, mimeType: mimeType, originalSource: originalSource });
+        }); // End map
+        await Promise.all(processingPromises);
         if (processedFiles.length !== files.length) {
-            // This case might not be reached if Promise.all rejects on first error
             throw new Error("Some files failed during processing or upload.");
         }
         if (processedFiles.length === 0) {
-            throw new Error("No files were successfully processed for upload.");
+            throw new Error("No files were successfully processed.");
         }
-        // --- 2. Poll for ACTIVE status for all uploaded files ---
-        console.log(`[understandMedia] Polling status for ${processedFiles.length} uploaded file(s)...`);
-        const pollingPromises = processedFiles.map(fileInfo => pollFileStatus(fileInfo.name));
-        await Promise.all(pollingPromises); // Wait for all files to become ACTIVE
-        console.log(`[understandMedia] All files are ACTIVE.`);
+        // --- 2. Poll for ACTIVE status for newly uploaded files ---
+        if (filesToPoll.length > 0) {
+            console.log(`[understandMedia] Polling status for ${filesToPoll.length} newly uploaded file(s)...`);
+            const pollingPromises = filesToPoll.map(name => pollFileStatus(name));
+            await Promise.all(pollingPromises);
+            console.log(`[understandMedia] All newly uploaded files are ACTIVE.`);
+        }
+        else {
+            console.log(`[understandMedia] No new files were uploaded, skipping polling.`);
+        }
         // --- 3. Call Gemini Generate Content ---
         const generateContentUrl = `/v1beta/models/${GEMINI_UNDERSTANDING_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
         const requestParts = [

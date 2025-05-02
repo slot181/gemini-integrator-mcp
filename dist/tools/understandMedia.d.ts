@@ -5,30 +5,44 @@ export declare const understandMediaSchema: z.ZodObject<{
     files: z.ZodArray<z.ZodEffects<z.ZodObject<{
         url: z.ZodOptional<z.ZodString>;
         path: z.ZodOptional<z.ZodString>;
+        file_uri: z.ZodOptional<z.ZodString>;
+        mime_type: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
         path?: string | undefined;
         url?: string | undefined;
+        file_uri?: string | undefined;
+        mime_type?: string | undefined;
     }, {
         path?: string | undefined;
         url?: string | undefined;
+        file_uri?: string | undefined;
+        mime_type?: string | undefined;
     }>, {
         path?: string | undefined;
         url?: string | undefined;
+        file_uri?: string | undefined;
+        mime_type?: string | undefined;
     }, {
         path?: string | undefined;
         url?: string | undefined;
+        file_uri?: string | undefined;
+        mime_type?: string | undefined;
     }>, "many">;
 }, "strip", z.ZodTypeAny, {
     text: string;
     files: {
         path?: string | undefined;
         url?: string | undefined;
+        file_uri?: string | undefined;
+        mime_type?: string | undefined;
     }[];
 }, {
     text: string;
     files: {
         path?: string | undefined;
         url?: string | undefined;
+        file_uri?: string | undefined;
+        mime_type?: string | undefined;
     }[];
 }>;
 export declare const understandMediaShape: {
@@ -36,18 +50,28 @@ export declare const understandMediaShape: {
     files: z.ZodArray<z.ZodEffects<z.ZodObject<{
         url: z.ZodOptional<z.ZodString>;
         path: z.ZodOptional<z.ZodString>;
+        file_uri: z.ZodOptional<z.ZodString>;
+        mime_type: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
         path?: string | undefined;
         url?: string | undefined;
+        file_uri?: string | undefined;
+        mime_type?: string | undefined;
     }, {
         path?: string | undefined;
         url?: string | undefined;
+        file_uri?: string | undefined;
+        mime_type?: string | undefined;
     }>, {
         path?: string | undefined;
         url?: string | undefined;
+        file_uri?: string | undefined;
+        mime_type?: string | undefined;
     }, {
         path?: string | undefined;
         url?: string | undefined;
+        file_uri?: string | undefined;
+        mime_type?: string | undefined;
     }>, "many">;
 };
 type UnderstandMediaParams = z.infer<typeof understandMediaSchema>;

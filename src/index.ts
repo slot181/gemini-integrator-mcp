@@ -51,7 +51,7 @@ const axiosInstance = axios.create({ // Remove explicit type annotation
 // Create the MCP Server instance
 const server = new McpServer({
     name: 'gemini-integrator-mcp',
-    version: '1.0.8' // Initial version
+    version: '1.0.9' // Initial version
 });
 
 // --- Tool Registration ---
