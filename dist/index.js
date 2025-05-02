@@ -15,6 +15,8 @@ import { generateImageSchema, handleGenerateImage } from './tools/generateImage.
 import { editImageShape, handleEditImage } from './tools/editImage.js';
 import { generateVideoSchema, handleGenerateVideo } from './tools/generateVideo.js';
 import { understandMediaShape, handleUnderstandMedia } from './tools/understandMedia.js';
+import { listFilesSchema, handleListFiles } from './tools/listFiles.js'; // Import listFiles tool
+import { deleteFileSchema, handleDeleteFile } from './tools/deleteFile.js'; // Import deleteFile tool
 // --- Initialization ---
 // Validate essential configuration
 if (!GEMINI_API_KEY) {
@@ -39,7 +41,7 @@ const axiosInstance = axios.create({
 // Create the MCP Server instance
 const server = new McpServer({
     name: 'gemini-integrator-mcp',
-    version: '1.0.6' // Initial version
+    version: '1.0.8' // Initial version
 });
 // --- Tool Registration ---
 // Register the gemini_generate_image tool
@@ -55,6 +57,12 @@ server.tool('gemini_generate_video', generateVideoSchema.shape, // Use .shape fo
 // Register the gemini_understand_media tool
 server.tool('gemini_understand_media', understandMediaShape, // Use the exported base shape for registration
 (validatedParams, extra) => handleUnderstandMedia(validatedParams, axiosInstance));
+// Register the gemini_list_files tool
+server.tool('gemini_list_files', listFilesSchema.shape, // Empty schema, use .shape
+(validatedParams, extra) => handleListFiles(validatedParams, axiosInstance));
+// Register the gemini_delete_file tool
+server.tool('gemini_delete_file', deleteFileSchema.shape, // Use .shape for basic object schema
+(validatedParams, extra) => handleDeleteFile(validatedParams, axiosInstance));
 // --- Server Connection ---
 // Create the transport (stdio in this case)
 const transport = new StdioServerTransport();
