@@ -15,7 +15,7 @@ const editImageBaseSchema = z.object({
     image_url: z.string().url().optional().describe("URL of the image to edit."), // Moved description
     image_path: z.string().min(1).optional().describe("Local path to the image to edit."), // Moved description
     // Add other potential Gemini parameters as needed
-});
+}).describe("Edits an image based on a text prompt using the Google Gemini image editing service.");
 // Define the refined schema for validation logic
 export const editImageSchema = editImageBaseSchema.refine(data => !!data.image_url !== !!data.image_path, {
     message: "Provide either image_url or image_path, but not both.",

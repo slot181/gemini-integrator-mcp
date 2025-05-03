@@ -8,18 +8,18 @@ import { deleteFile, downloadFile } from '../utils/fileUtils.js';
 // --- Helper function to delay execution ---
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // --- Polling Configuration ---
-const FILE_POLLING_INTERVAL_MS = 5000; // Check every 5 seconds
-const MAX_FILE_POLLING_ATTEMPTS = 36; // Max attempts (e.g., 36 * 5s = 3 minutes timeout)
+const FILE_POLLING_INTERVAL_MS = 2000; // Check every 2 seconds
+const MAX_FILE_POLLING_ATTEMPTS = 29; // Max attempts (e.g., 29 * 2s = 58 seconds timeout)
 // Schema for a single file source (URL or Path)
 const fileSourceSchema = z.object({
     url: z.string().url().optional().describe("URL of the file (image, video, audio, pdf, text, code)."),
     path: z.string().optional().describe("Local path to the file (image, video, audio, pdf, text, code)."),
     // Added file_uri as an alternative input
-    file_uri: z.string().regex(/^files\/[a-zA-Z0-9]+$/, "file_uri must be in the format 'files/xxxxxx'").optional()
-        .describe("Optional. Pre-uploaded file URI (e.g., 'files/xxxxxx'). If provided, 'url' and 'path' for this file object will be ignored."),
+    file_uri: z.string().url().regex(/^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/files\/[a-zA-Z0-9]+$/, "file_uri must be a valid Google File API URI (e.g., https://generativelanguage.googleapis.com/v1beta/files/xxxxxx)").optional()
+        .describe("Optional. Pre-uploaded file URI (the full HTTPS URL returned as 'uri' by the Files API, e.g., 'https://generativelanguage.googleapis.com/v1beta/files/xxxxxx'). If provided, 'url' and 'path' for this file object will be ignored."),
     // Added mime_type, required only if file_uri is provided
     mime_type: z.string().optional()
-        .describe("Required only if 'file_uri' is provided. The MIME type of the pre-uploaded file (e.g., 'video/mp4', 'application/pdf')."),
+        .describe("Required only if 'file_uri' (the full URI) is provided. The MIME type of the pre-uploaded file (e.g., 'video/mp4', 'application/pdf')."),
 }).refine(data => {
     const sources = [data.url, data.path, data.file_uri].filter(Boolean).length;
     if (sources !== 1)
@@ -35,7 +35,7 @@ const understandMediaBaseSchema = z.object({
     text: z.string().min(1).describe("Required. The specific question or instruction for the AI model about the content of the provided file(s). E.g., 'Summarize this document', 'Describe this image', 'Transcribe this audio'. This field must contain the textual prompt."),
     // Updated description for 'files'
     files: z.array(fileSourceSchema).min(1).describe("Required. An array containing one or more file objects. Each object *must* specify either a 'url', 'path', or ('file_uri' and 'mime_type') key pointing to a supported file. Example: [{path: '/path/to/report.pdf'}, {url: '...'}, {file_uri: 'files/abcde', mime_type: 'image/png'}]"),
-});
+}).describe("Analyzes the content of provided media files (images, audio, video, documents) using the Google Gemini multimodal understanding service and answers questions about them.");
 // Refined schema (though base shape is used for registration)
 export const understandMediaSchema = understandMediaBaseSchema; // No top-level refine needed now
 // Export the base shape specifically for tool registration
@@ -201,18 +201,31 @@ export async function handleUnderstandMedia(params, axiosInstance) {
         // --- 1. Process each file input ---
         const processingPromises = files.map(async (fileSource) => {
             const originalSource = fileSource.url || fileSource.path || fileSource.file_uri || 'unknown';
-            let fileUriForRequest; // URI to use in generateContent (relative path 'files/xxx')
             let mimeType = fileSource.mime_type;
-            let fileName; // Relative path 'files/xxx'
-            // --- Handle pre-uploaded file_uri ---
+            let fileName; // Relative path 'files/xxx' used for polling
+            let fullFileUri; // Full HTTPS URI for generateContent
+            // --- Handle pre-uploaded file_uri (which is the full URI) ---
             if (fileSource.file_uri && mimeType) {
                 console.log(`[understandMedia] Using pre-uploaded file URI: ${fileSource.file_uri} with MIME type: ${mimeType}`);
-                // Use the relative path directly for the generateContent request
-                fileUriForRequest = fileSource.file_uri;
-                fileName = fileSource.file_uri; // Store the relative path as 'name' for consistency if needed later
-                // No polling needed
+                fullFileUri = fileSource.file_uri; // The input is the full URI
+                // Extract the relative path (name) from the full URI for potential use (e.g., logging)
+                try {
+                    const urlParts = fullFileUri.split('/');
+                    const fileId = urlParts[urlParts.length - 1]; // Get the last part
+                    if (fileId) {
+                        fileName = `files/${fileId}`; // Reconstruct the relative name format
+                        console.log(`[understandMedia] Extracted relative name: ${fileName} from URI: ${fullFileUri}`);
+                    }
+                    else {
+                        console.warn(`[understandMedia] Could not extract relative name from provided file_uri: ${fullFileUri}`);
+                    }
+                }
+                catch (e) {
+                    console.warn(`[understandMedia] Error extracting relative name from file_uri ${fullFileUri}:`, e);
+                }
+                // No polling needed for pre-uploaded files
             }
-            // --- Handle url or path ---
+            // --- Handle url or path (requires upload) ---
             else if (fileSource.url || fileSource.path) {
                 let localFilePath = null;
                 let isTemp = false;
@@ -245,10 +258,10 @@ export async function handleUnderstandMedia(params, axiosInstance) {
                 // Upload the file
                 const displayName = path.basename(localFilePath);
                 const uploadResult = await uploadFileToGoogleApi(localFilePath, mimeType, displayName);
-                // Use the relative name (files/xxx) for the generateContent request URI
-                fileUriForRequest = uploadResult.name;
+                // Store both the relative name (for polling) and the full URI (for generateContent)
                 fileName = uploadResult.name;
-                filesToPoll.push(fileName);
+                fullFileUri = uploadResult.uri; // Use the full URI returned by the upload API
+                filesToPoll.push(fileName); // Poll using the relative name
             }
             else {
                 throw new Error(`Invalid file source object, missing url, path, or file_uri/mime_type: ${JSON.stringify(fileSource)}`);
@@ -258,11 +271,11 @@ export async function handleUnderstandMedia(params, axiosInstance) {
                 throw new Error(`Unsupported file type '${mimeType || 'unknown'}' for source: ${originalSource}.`);
             }
             console.log(`[understandMedia] Validated MIME type: ${mimeType} for source: ${originalSource}`);
-            if (!fileUriForRequest) {
-                throw new Error(`Failed to obtain file URI for source: ${originalSource}`);
+            if (!fullFileUri) { // Check if we have the full URI now
+                throw new Error(`Failed to obtain the full file URI for source: ${originalSource}`);
             }
-            // Store the relative URI ('files/xxx') needed for generateContent
-            processedFiles.push({ name: fileName, uri: fileUriForRequest, mimeType: mimeType, originalSource: originalSource });
+            // Store the full URI needed for generateContent
+            processedFiles.push({ name: fileName, fullUri: fullFileUri, mimeType: mimeType, originalSource: originalSource });
         }); // End map
         await Promise.all(processingPromises);
         if (processedFiles.length !== files.length) {
@@ -286,9 +299,9 @@ export async function handleUnderstandMedia(params, axiosInstance) {
         console.log('[understandMedia] Processed files before mapping to request parts:', JSON.stringify(processedFiles, null, 2));
         const requestParts = [
             { text: text },
-            // Use the stored relative URI ('files/xxx') here
+            // Use the stored full HTTPS URI here
             ...processedFiles.map(fileInfo => ({
-                file_data: { mime_type: fileInfo.mimeType, file_uri: fileInfo.uri }
+                file_data: { mime_type: fileInfo.mimeType, file_uri: fileInfo.fullUri }
             }))
         ];
         const requestPayload = { contents: [{ parts: requestParts }] };

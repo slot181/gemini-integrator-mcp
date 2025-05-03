@@ -20,6 +20,7 @@ import { generateVideoSchema, handleGenerateVideo } from './tools/generateVideo.
 import { understandMediaShape, handleUnderstandMedia } from './tools/understandMedia.js';
 import { listFilesSchema, handleListFiles } from './tools/listFiles.js'; // Import listFiles tool
 import { deleteFileSchema, handleDeleteFile } from './tools/deleteFile.js'; // Import deleteFile tool
+import { webSearchSchema, handleWebSearch } from './tools/webSearch.js'; // Import webSearch tool
 
 // --- Initialization ---
 
@@ -48,7 +49,7 @@ const axiosInstance = axios.create({ // Remove explicit type annotation
 // Create the MCP Server instance
 const server = new McpServer({
     name: 'gemini-integrator-mcp',
-    version: '1.1.0' // Initial version
+    version: '1.2.0' // Initial version
 });
 
 // --- Tool Registration ---
@@ -94,6 +95,13 @@ server.tool(
     'gemini_delete_file',
     deleteFileSchema.shape, // Use .shape for basic object schema
     (validatedParams, extra) => handleDeleteFile(validatedParams, axiosInstance)
+);
+
+// Register the gemini_web_search tool
+server.tool(
+    'gemini_web_search',
+    webSearchSchema.shape, // Use .shape for basic object schema
+    (validatedParams, extra) => handleWebSearch(validatedParams, axiosInstance)
 );
 
 

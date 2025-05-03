@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import type { TextContent } from '@modelcontextprotocol/sdk/types.js';
-export declare const listFilesSchema: z.ZodObject<{}, "strip", z.ZodTypeAny, {}, {}>;
+export declare const listFilesSchema: z.ZodObject<{
+    description: z.ZodOptional<z.ZodString>;
+}, "strip", z.ZodTypeAny, {
+    description?: string | undefined;
+}, {
+    description?: string | undefined;
+}>;
 /**
  * Handles the request to list files uploaded via the Google File API.
  */

@@ -2,8 +2,11 @@ import { z } from 'zod';
 import type { TextContent } from '@modelcontextprotocol/sdk/types.js';
 import { GEMINI_API_KEY } from '../config.js'; // Only need API Key
 
-// --- Define Schema (No input parameters needed) ---
-export const listFilesSchema = z.object({}); // Empty object schema
+// --- Define Schema ---
+export const listFilesSchema = z.object({
+    // Adding an optional description parameter for clarity, though not used by the API call itself.
+    description: z.string().optional().describe("Optional description for the purpose of this listing request (not sent to API).")
+}).describe("Lists files previously uploaded to the Google Gemini File API service.");
 
 // --- Define Response Interface (Based on example) ---
 interface FileListItem {

@@ -10,12 +10,12 @@ export const generateVideoSchema = z.object({
     prompt: z.string().min(1).describe("Required. Descriptive text prompt detailing the desired video content."),
     aspectRatio: z.enum(["16:9", "9:16", "1:1"]).optional().default("16:9").describe("Optional. Aspect ratio for the generated video. Defaults to 16:9."),
     personGeneration: z.enum(["dont_allow", "allow_adult"]).optional().default("dont_allow").describe("Optional. Control generation of people ('dont_allow', 'allow_adult'). Defaults to dont_allow."),
-});
+}).describe("Generates a video based on a text prompt using the Google Gemini video generation service (Veo). This is an asynchronous operation.");
 // Helper function to delay execution
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // Polling configuration
-const POLLING_INTERVAL_MS = 10000; // Check every 10 seconds
-const MAX_POLLING_ATTEMPTS = 360; // Max attempts (e.g., 360 * 10s = 1 hour timeout)
+const POLLING_INTERVAL_MS = 5000; // Check every 5 seconds
+const MAX_POLLING_ATTEMPTS = 60; // Max attempts (e.g., 60 * 5s = 5 minutes timeout)
 /**
  * Handles the video generation tool request.
  * Initiates async generation, polls for completion, saves the video locally,
@@ -91,63 +91,52 @@ export async function handleGenerateVideo(params, axiosInstance // Use 'any' to 
             console.error(`[generateVideo] Operation ${operationName} completed but response is missing:`, JSON.stringify(operationStatus));
             throw new Error('Video generation completed but no response data found.');
         }
-        // --- Extract Video Data (Needs Verification based on actual API) ---
-        // Prioritize inlineData if available, otherwise check for URI
-        const parts = operationStatus.response.candidates?.[0]?.content?.parts;
-        const videoPart = parts?.find((part) => // Use any temporarily
-         (part.inlineData && part.inlineData.mimeType.startsWith('video/')) ||
-            (part.uri && part.uri.toLowerCase().endsWith('.mp4')) // Example check for URI
-        );
+        // --- Extract Video Data (Updated based on provided JSON structure) ---
+        const generatedSamples = operationStatus.response?.generateVideoResponse?.generatedSamples;
+        if (!generatedSamples || generatedSamples.length === 0) {
+            console.error('[generateVideo] No generatedSamples found in successful response:', JSON.stringify(operationStatus.response));
+            throw new Error('Video generation succeeded but no generatedSamples array found.');
+        }
+        // Get the URI from the first sample
+        const videoUri = generatedSamples[0]?.video?.uri;
+        if (!videoUri) {
+            console.error('[generateVideo] No video URI found in the first generated sample:', JSON.stringify(generatedSamples[0]));
+            throw new Error('Video generation succeeded but no video URI found in the response.');
+        }
+        console.log(`[generateVideo] Found video download URI: ${videoUri}. Attempting download...`);
         let videoData;
         let fileExtension = 'mp4'; // Default
-        if (videoPart?.inlineData) {
-            console.log('[generateVideo] Found video data in inlineData.');
-            const base64Data = videoPart.inlineData.data;
-            const mimeType = videoPart.inlineData.mimeType;
-            fileExtension = mimeType.split('/')[1] || 'mp4';
-            videoData = Buffer.from(base64Data, 'base64');
+        try {
+            // Download the video using the URI
+            // Note: This URI likely includes the API key or temporary credentials, handle potential expiry/auth issues if needed.
+            const downloadResponse = await axios.get(videoUri, {
+                responseType: 'arraybuffer',
+                timeout: REQUEST_TIMEOUT * 5 // Increased timeout for potentially large video downloads
+            });
+            // Explicitly cast data to ArrayBuffer before passing to Buffer.from
+            videoData = Buffer.from(downloadResponse.data);
+            // Try to determine extension from Content-Type header or URI path
+            const contentType = downloadResponse.headers['content-type'];
+            if (contentType && contentType.startsWith('video/')) {
+                fileExtension = contentType.split('/')[1] || 'mp4';
+            }
+            else {
+                // Fallback to URI path if Content-Type is not helpful
+                try {
+                    const uriPath = new URL(videoUri).pathname;
+                    const ext = path.extname(uriPath).toLowerCase().substring(1);
+                    if (ext)
+                        fileExtension = ext;
+                }
+                catch (urlParseError) {
+                    console.warn(`[generateVideo] Could not parse video URI path to determine extension: ${urlParseError}`);
+                }
+            }
+            console.log(`[generateVideo] Determined file extension: ${fileExtension}`);
         }
-        else if (videoPart?.uri) {
-            // If Gemini returns a URI (e.g., GCS), we need to download it
-            const videoUri = videoPart.uri;
-            console.log(`[generateVideo] Found video URI: ${videoUri}. Attempting download...`);
-            try {
-                // This might require authenticated download depending on the URI type
-                const downloadResponse = await axios.get(videoUri, { responseType: 'arraybuffer', timeout: REQUEST_TIMEOUT * 2 }); // Longer timeout for download
-                // Explicitly cast data to ArrayBuffer before passing to Buffer.from
-                videoData = Buffer.from(downloadResponse.data);
-                // Try to get extension from URI
-                const uriPath = new URL(videoUri).pathname;
-                const ext = path.extname(uriPath).toLowerCase().substring(1);
-                if (ext)
-                    fileExtension = ext;
-            }
-            catch (downloadError) {
-                console.error(`[generateVideo] Failed to download video from URI ${videoUri}:`, downloadError);
-                throw new Error(`Failed to download video from provided URI: ${videoUri}`);
-            }
-        }
-        else if (operationStatus.response.videoUri) {
-            // Handle direct videoUri if the API provides it
-            const videoUri = operationStatus.response.videoUri;
-            console.log(`[generateVideo] Found direct video URI: ${videoUri}. Attempting download...`);
-            try {
-                const downloadResponse = await axios.get(videoUri, { responseType: 'arraybuffer', timeout: REQUEST_TIMEOUT * 2 });
-                // Explicitly cast data to ArrayBuffer before passing to Buffer.from
-                videoData = Buffer.from(downloadResponse.data);
-                const uriPath = new URL(videoUri).pathname;
-                const ext = path.extname(uriPath).toLowerCase().substring(1);
-                if (ext)
-                    fileExtension = ext;
-            }
-            catch (downloadError) {
-                console.error(`[generateVideo] Failed to download video from direct URI ${videoUri}:`, downloadError);
-                throw new Error(`Failed to download video from provided direct URI: ${videoUri}`);
-            }
-        }
-        else {
-            console.error('[generateVideo] No video data (inlineData or URI) found in successful response:', JSON.stringify(operationStatus.response));
-            throw new Error('Video generation succeeded but no video data could be extracted.');
+        catch (downloadError) {
+            console.error(`[generateVideo] Failed to download video from URI ${videoUri}:`, downloadError);
+            throw new Error(`Failed to download generated video from URI: ${videoUri}`);
         }
         // --- 4. Save Locally ---
         const uniqueFilename = generateUniqueFilename('gemini-vid', `.${fileExtension}`);
