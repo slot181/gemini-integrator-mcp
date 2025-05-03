@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { GEMINI_API_KEY, GEMINI_SEARCH_MODEL, REQUEST_TIMEOUT } from '../config.js'; // Import necessary config
 // --- Define Input Schema ---
 export const webSearchSchema = z.object({
-    query: z.string().min(1).describe("Required. The search query or question to ask."),
+    query: z.string().min(1).describe("Required. The search query or question for the Google Gemini web search service. (English is recommended for best results)."),
 }).describe("Performs a web search using the Google Gemini Search Retrieval tool and returns the answer along with search sources.");
 /**
  * Handles the web search tool request.
@@ -12,17 +12,12 @@ export async function handleWebSearch(params, axiosInstance // Use 'any' type co
     const { query } = params;
     const model = GEMINI_SEARCH_MODEL; // Use configured search model
     const apiUrl = `/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+    // Add a prefix to encourage web search
+    const prefixedQuery = `Please search the internet for the following questions: ${query}`;
     const requestPayload = {
-        contents: [{ parts: [{ text: query }] }],
+        contents: [{ parts: [{ text: prefixedQuery }] }], // Use the prefixed query
         tools: [{
-                google_search_retrieval: {
-                    // Use MODE_AUTO or MODE_DYNAMIC based on preference, setting threshold to 0 forces search
-                    // Using MODE_DYNAMIC as per example, but threshold 0 makes it effectively always search
-                    dynamic_retrieval_config: {
-                        mode: "MODE_DYNAMIC",
-                        dynamic_threshold: 0, // Force search
-                    }
-                }
+                google_search: {}
             }]
     };
     try {

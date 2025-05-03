@@ -11,9 +11,9 @@ import { uploadToCfImgbed } from '../utils/cfUtils.js'; // Add .js extension
 import { GEMINI_API_KEY, DEFAULT_OUTPUT_DIR, REQUEST_TIMEOUT } from '../config.js'; // Add .js extension
 // Define the base object schema first
 const editImageBaseSchema = z.object({
-    prompt: z.string().min(1).describe("Instructions for how to edit the provided image."), // Moved description
-    image_url: z.string().url().optional().describe("URL of the image to edit."), // Moved description
-    image_path: z.string().min(1).optional().describe("Local path to the image to edit."), // Moved description
+    prompt: z.string().min(1).describe("Required. Instructions for how the Google Gemini service should edit the provided image. (English is recommended for best results)."),
+    image_url: z.string().url().optional().describe("Optional. URL of the image to edit using Gemini."),
+    image_path: z.string().min(1).optional().describe("Optional. Local path to the image to edit using Gemini."),
     // Add other potential Gemini parameters as needed
 }).describe("Edits an image based on a text prompt using the Google Gemini image editing service.");
 // Define the refined schema for validation logic

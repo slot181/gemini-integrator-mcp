@@ -7,7 +7,7 @@ import { uploadToCfImgbed } from '../utils/cfUtils.js'; // Add .js extension
 import { GEMINI_API_KEY, DEFAULT_OUTPUT_DIR, GEMINI_API_URL, REQUEST_TIMEOUT } from '../config.js'; // Add .js extension
 // Define the input schema for the generateVideo tool using Zod
 export const generateVideoSchema = z.object({
-    prompt: z.string().min(1).describe("Required. Descriptive text prompt detailing the desired video content."),
+    prompt: z.string().min(1).describe("Required. Descriptive text prompt for the Google Gemini video generation service (Veo). (English is recommended for best results)."),
     aspectRatio: z.enum(["16:9", "9:16", "1:1"]).optional().default("16:9").describe("Optional. Aspect ratio for the generated video. Defaults to 16:9."),
     personGeneration: z.enum(["dont_allow", "allow_adult"]).optional().default("dont_allow").describe("Optional. Control generation of people ('dont_allow', 'allow_adult'). Defaults to dont_allow."),
 }).describe("Generates a video based on a text prompt using the Google Gemini video generation service (Veo). This is an asynchronous operation.");
