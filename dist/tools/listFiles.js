@@ -4,7 +4,7 @@ import { GEMINI_API_KEY } from '../config.js'; // Only need API Key
 export const listFilesSchema = z.object({
     // Adding an optional description parameter for clarity, though not used by the API call itself.
     description: z.string().optional().describe("Optional description for the purpose of this listing request (not sent to API).")
-}).describe("Lists files previously uploaded to the Google Gemini File API service.");
+}); // Removed top-level .describe()
 /**
  * Handles the request to list files uploaded via the Google File API.
  */
