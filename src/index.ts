@@ -7,6 +7,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ListToolsRequestSchema, CallToolRequestSchema, McpError, ErrorCode, CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import axios from 'axios'; // Remove AxiosInstance import
 import { z } from 'zod'; // Import Zod for schema validation
+import { zodToJsonSchema } from 'zod-to-json-schema'; // Import the conversion function
 
 // Import configuration variables (removed unused ones)
 import {
@@ -55,7 +56,7 @@ const axiosInstance = axios.create({ // Remove explicit type annotation
 // Create the Server instance (using Server, not McpServer)
 const server = new Server({
     name: 'gemini-integrator-mcp',
-    version: '1.2.4' // Initial version
+    version: '1.2.5' // Initial version
 // Declare tool capability to allow setRequestHandler for tool schemas
 }, { capabilities: { tools: {} } });
 
@@ -65,39 +66,44 @@ const toolDefinitions = [
     {
         name: 'gemini_generate_image',
         description: "Generates an image based on a text prompt using the Google Gemini image generation service (Imagen 3 or Gemini 2.0 Flash).",
-        // IMPORTANT: Using the Zod shape directly might not be standard JSON Schema.
-        // The client needs to be able to interpret this or it needs conversion.
-        input_schema: generateImageSchema.shape,
+        // Convert Zod schema to JSON Schema
+        input_schema: zodToJsonSchema(generateImageSchema, "gemini_generate_image_input"),
     },
     {
         name: 'gemini_edit_image',
         description: "Edits an image based on a text prompt using the Google Gemini image editing service.",
-        input_schema: editImageShape,
+        // Convert Zod schema (the refined one) to JSON Schema
+        input_schema: zodToJsonSchema(editImageSchema, "gemini_edit_image_input"),
     },
     {
         name: 'gemini_generate_video',
         description: "Generates a video based on a text prompt using the Google Gemini video generation service (Veo). This is an asynchronous operation.",
-        input_schema: generateVideoSchema.shape,
+        // Convert Zod schema to JSON Schema
+        input_schema: zodToJsonSchema(generateVideoSchema, "gemini_generate_video_input"),
     },
     {
         name: 'gemini_understand_media',
         description: "Analyzes the content of provided media files (images, audio, video, documents) using the Google Gemini multimodal understanding service and answers questions about them.",
-        input_schema: understandMediaShape,
+        // Convert Zod schema (the refined one) to JSON Schema
+        input_schema: zodToJsonSchema(understandMediaSchema, "gemini_understand_media_input"),
     },
     {
         name: 'gemini_list_files',
         description: "Lists files previously uploaded to the Google Gemini File API service.",
-        input_schema: listFilesSchema.shape,
+        // Convert Zod schema to JSON Schema
+        input_schema: zodToJsonSchema(listFilesSchema, "gemini_list_files_input"),
     },
     {
         name: 'gemini_delete_file',
         description: "Deletes a specific file from the Google Gemini File API storage using its relative name.",
-        input_schema: deleteFileSchema.shape,
+        // Convert Zod schema to JSON Schema
+        input_schema: zodToJsonSchema(deleteFileSchema, "gemini_delete_file_input"),
     },
     {
         name: 'gemini_web_search',
         description: "Performs a web search using the Google Gemini Search Retrieval tool and returns the answer along with search sources.",
-        input_schema: webSearchSchema.shape,
+        // Convert Zod schema to JSON Schema
+        input_schema: zodToJsonSchema(webSearchSchema, "gemini_web_search_input"),
     },
 ];
 
