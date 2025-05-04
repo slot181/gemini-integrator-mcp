@@ -20,6 +20,8 @@ import { understandMediaSchema, handleUnderstandMedia } from './tools/understand
 import { listFilesSchema, handleListFiles } from './tools/listFiles.js'; // Import listFiles tool
 import { deleteFileSchema, handleDeleteFile } from './tools/deleteFile.js'; // Import deleteFile tool
 import { webSearchSchema, handleWebSearch } from './tools/webSearch.js'; // Import webSearch tool
+// Import the new large media upload tool
+import { uploadLargeMediaSchema, uploadLargeMediaShape, handleUploadLargeMedia } from './tools/uploadLargeMedia.js';
 // --- Initialization ---
 // Validate essential configuration
 if (!GEMINI_API_KEY) {
@@ -44,7 +46,7 @@ const axiosInstance = axios.create({
 // Create the Server instance (using Server, not McpServer)
 const server = new Server({
     name: 'gemini-integrator-mcp',
-    version: '1.2.8' // Initial version
+    version: '1.2.9' // Initial version
     // Declare tool capability to allow setRequestHandler for tool schemas
 }, { capabilities: { tools: {} } });
 // --- Tool Definitions with Descriptions ---
@@ -144,6 +146,15 @@ const toolDefinitions = [
             required: ['query'],
         },
     },
+    {
+        name: 'gemini_upload_large_media',
+        description: "Uploads a large media file (>20MB) to the Google Gemini File API in the background. Returns an immediate confirmation and sends a notification (via configured OneBot/Telegram) upon completion or failure. Requires notification setup.",
+        inputSchema: {
+            type: 'object',
+            properties: uploadLargeMediaShape, // Use the imported shape
+            required: ['url', 'path'].filter(prop => uploadLargeMediaShape[prop] && !uploadLargeMediaShape[prop].isOptional()), // Dynamically determine required based on shape (though refine handles it)
+        },
+    },
 ];
 // --- Request Handlers ---
 // Handle ListTools request - return the manually defined tools
@@ -172,6 +183,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         'gemini_list_files': listFilesSchema,
         'gemini_delete_file': deleteFileSchema,
         'gemini_web_search': webSearchSchema,
+        'gemini_upload_large_media': uploadLargeMediaSchema, // Add the new schema
     };
     const schema = toolSchemas[name];
     if (!schema) {
@@ -207,6 +219,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 return await handleDeleteFile(validatedArgs, axiosInstance);
             case 'gemini_web_search':
                 return await handleWebSearch(validatedArgs, axiosInstance);
+            case 'gemini_upload_large_media':
+                return await handleUploadLargeMedia(validatedArgs); // Does not need axiosInstance directly
             default:
                 // This case should be caught by the check above or schema lookup
                 throw new McpError(ErrorCode.MethodNotFound, `Tool '${name}' not found.`);
