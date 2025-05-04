@@ -7,7 +7,6 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ListToolsRequestSchema, CallToolRequestSchema, McpError, ErrorCode, CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import axios from 'axios'; // Remove AxiosInstance import
 import { z } from 'zod'; // Import Zod for schema validation
-// Removed zod-to-json-schema import
 
 // Import configuration variables (removed unused ones)
 import {
@@ -56,7 +55,7 @@ const axiosInstance = axios.create({ // Remove explicit type annotation
 // Create the Server instance (using Server, not McpServer)
 const server = new Server({
     name: 'gemini-integrator-mcp',
-    version: '1.2.6' // Initial version
+    version: '1.2.7' // Initial version
 // Declare tool capability to allow setRequestHandler for tool schemas
 }, { capabilities: { tools: {} } });
 
@@ -115,7 +114,7 @@ const toolDefinitions = [
                     items: {
                         type: 'object',
                         properties: {
-                            url: { type: 'string', format: 'url', description: "URL of the file (image, video, audio, pdf, text, code)." },
+                            url: { type: 'string', format: 'url', description: "URL of the file (image, video, audio, pdf, text, code) OR a YouTube video URL (e.g., https://www.youtube.com/watch?v=...)." },
                             path: { type: 'string', description: "Local path to the file (image, video, audio, pdf, text, code)." },
                             file_uri: { type: 'string', format: 'url', pattern: '^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/files\/[a-zA-Z0-9]+$', description: "Optional. Pre-uploaded file URI (the full HTTPS URL returned as 'uri' by the Files API)." },
                             mime_type: { type: 'string', description: "Required only if 'file_uri' is provided. The MIME type." },

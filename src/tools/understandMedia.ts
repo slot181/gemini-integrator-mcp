@@ -3,9 +3,25 @@ import axios from 'axios'; // Default import
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import * as mime from 'mime-types';
+import TelegramBot from 'node-telegram-bot-api'; // Import Telegram Bot library
 import type { TextContent } from '@modelcontextprotocol/sdk/types.js';
-import { GEMINI_API_KEY, GEMINI_API_URL, GEMINI_UNDERSTANDING_MODEL, REQUEST_TIMEOUT, DEFAULT_OUTPUT_DIR } from '../config.js';
+import {
+    GEMINI_API_KEY,
+    GEMINI_API_URL,
+    GEMINI_UNDERSTANDING_MODEL,
+    REQUEST_TIMEOUT,
+    DEFAULT_OUTPUT_DIR,
+    ONEBOT_HTTP_URL, // Import OneBot config
+    ONEBOT_ACCESS_TOKEN, // Import OneBot config
+    TELEGRAM_BOT_TOKEN, // Import Telegram config
+    TELEGRAM_CHAT_ID, // Import Telegram config
+    ONEBOT_MESSAGE_TYPE, // Import OneBot message type
+    ONEBOT_TARGET_ID // Import OneBot target ID
+} from '../config.js';
 import { deleteFile, downloadFile } from '../utils/fileUtils.js';
+
+// --- Constants ---
+const MAX_INLINE_FILE_SIZE_BYTES = 20 * 1024 * 1024; // 20MB limit for inline data
 
 // --- Helper function to delay execution ---
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -16,7 +32,7 @@ const MAX_FILE_POLLING_ATTEMPTS = 90; // Max attempts (e.g., 90 * 2s = 180 secon
 
 // Schema for a single file source (URL or Path)
 const fileSourceSchema = z.object({
-    url: z.string().url().optional().describe("URL of the file (image, video, audio, pdf, text, code)."),
+    url: z.string().url().optional().describe("URL of the file (image, video, audio, pdf, text, code) OR a YouTube video URL (e.g., https://www.youtube.com/watch?v=...)."),
     path: z.string().optional().describe("Local path to the file (image, video, audio, pdf, text, code)."),
     // Added file_uri as an alternative input
     file_uri: z.string().url().regex(/^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/files\/[a-zA-Z0-9]+$/, "file_uri must be a valid Google File API URI (e.g., https://generativelanguage.googleapis.com/v1beta/files/xxxxxx)").optional()
@@ -59,9 +75,9 @@ interface FileInfo {
     updateTime: string;
     displayName: string;
     sizeBytes: string;
-    state?: 'PROCESSING' | 'ACTIVE' | 'FAILED' | 'STATE_UNSPECIFIED';
+    state?: 'PROCESSING' | 'ACTIVE' | 'FAILED' | 'STATE_UNSPECIFIED'; // Added STATE_UNSPECIFIED
     videoMetadata?: {
-        videoDuration: { seconds: number; nanos: number };
+        videoDuration: { seconds: string; nanos: number }; // Changed seconds to string based on potential API responses
     };
 }
 interface FileApiResponse {
@@ -84,15 +100,30 @@ interface GeminiContentResponse {
     };
 }
 
-// Interface to store processed file info (including name for polling and full URI for generateContent)
+// Interface to store processed file info
 interface ProcessedFileInfo {
-    name?: string; // Relative path 'files/xxx', used for polling if uploaded
-    fullUri: string; // Full HTTPS URI (e.g., https://.../files/xxx), used for generateContent
-    mimeType: string;
+    type: 'inline' | 'file_api' | 'youtube'; // How the file will be sent to Gemini
     originalSource: string; // URL, path, or file_uri for logging/errors
+    // For inline and file_api
+    mimeType?: string; // MIME type is needed for inline and file_api
+    // For inline
+    base64Data?: string;
+    // For file_api
+    name?: string; // Relative path 'files/xxx', used for polling if uploaded via API
+    fullUri?: string; // Full HTTPS URI (e.g., https://.../files/xxx), used for generateContent via API
+    // For youtube
+    youtubeUrl?: string; // The original YouTube URL
 }
 
-// Set of supported MIME types based on user feedback and Gemini docs
+// Regex to identify YouTube video URLs
+const YOUTUBE_URL_REGEX = /^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+
+// Set of supported MIME types based on user feedback and Gemini docs (for non-YouTube files)
+// Note: Gemini API v1beta has stricter limits than v1 for inline data (Images only currently)
+// We will check size first, then decide upload vs inline based on type support if needed.
+// For now, assume all SUPPORTED_MIME_TYPES *could* be inline if small enough,
+// but the API call might fail later if Gemini doesn't support that type inline.
+// The primary goal is to avoid *uploading* small files via the File API.
 const SUPPORTED_MIME_TYPES = new Set([
     // Video
     'video/mp4', 'video/mpeg', 'video/mov', 'video/avi', 'video/x-flv',
@@ -112,18 +143,109 @@ const SUPPORTED_MIME_TYPES = new Set([
     'text/markdown',
     'text/csv',
     'text/xml', 'application/xml',
-    'text/rtf', 'application/rtf'
+    'text/rtf', 'application/rtf',
+    // Add common code types explicitly if not covered by text/*
+    'application/json',
+    'application/javascript', // Redundant with text/javascript but safe to include
+    'application/x-typescript', 'text/typescript',
+    'text/x-java-source', 'text/java',
+    'text/x-c', 'text/x-csrc',
+    'text/x-csharp',
+    'text/x-php', 'application/x-httpd-php',
+    'text/x-ruby',
+    'text/x-go',
+    'text/rust', 'application/rust',
+    'text/swift',
+    'text/kotlin',
+    'text/scala',
+    'text/perl',
+    'text/shellscript', 'application/x-sh',
 ]);
+
+// --- Notification Functions ---
+
+/**
+ * Sends a notification message using OneBot v11 HTTP API based on configuration.
+ */
+async function sendOneBotNotification(message: string): Promise<void> {
+    // Check if essential OneBot config is present
+    if (!ONEBOT_HTTP_URL || !ONEBOT_MESSAGE_TYPE || !ONEBOT_TARGET_ID) {
+        // console.log('[OneBot Notification] URL, Message Type, or Target ID not configured, skipping.');
+        return;
+    }
+
+    // Validate message type
+    if (ONEBOT_MESSAGE_TYPE !== 'private' && ONEBOT_MESSAGE_TYPE !== 'group') {
+        console.error(`[OneBot Notification] Invalid ONEBOT_MESSAGE_TYPE configured: '${ONEBOT_MESSAGE_TYPE}'. Must be 'private' or 'group'. Skipping.`);
+        return;
+    }
+
+    console.log(`[OneBot Notification] Sending ${ONEBOT_MESSAGE_TYPE} notification to target ${ONEBOT_TARGET_ID} via ${ONEBOT_HTTP_URL}...`);
+
+    try {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (ONEBOT_ACCESS_TOKEN) {
+            headers['Authorization'] = `Bearer ${ONEBOT_ACCESS_TOKEN}`;
+        }
+
+        let payload: { action: string; params: Record<string, string> };
+
+        if (ONEBOT_MESSAGE_TYPE === 'private') {
+            payload = {
+                action: 'send_private_msg',
+                params: {
+                    user_id: ONEBOT_TARGET_ID,
+                    message: message
+                }
+            };
+        } else { // ONEBOT_MESSAGE_TYPE === 'group'
+            payload = {
+                action: 'send_group_msg',
+                params: {
+                    group_id: ONEBOT_TARGET_ID,
+                    message: message
+                }
+            };
+        }
+
+        await axios.post(ONEBOT_HTTP_URL, payload, {
+            headers,
+            timeout: REQUEST_TIMEOUT / 2 // Use a shorter timeout for notifications
+        });
+        console.log('[OneBot Notification] Notification sent successfully.');
+
+    } catch (error: any) {
+        console.error(`[OneBot Notification] Failed to send notification:`, error.response?.data || error.message || error);
+    }
+}
+
+/**
+ * Sends a notification message using Telegram Bot API.
+ */
+async function sendTelegramNotification(message: string): Promise<void> {
+    if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
+        // console.log('[Telegram Notification] Token or Chat ID not configured, skipping.');
+        return;
+    }
+    console.log(`[Telegram Notification] Sending notification to Chat ID ${TELEGRAM_CHAT_ID}...`);
+    try {
+        const bot = new TelegramBot(TELEGRAM_BOT_TOKEN);
+        await bot.sendMessage(TELEGRAM_CHAT_ID, message, { parse_mode: 'Markdown' }); // Use Markdown for potential formatting
+        console.log('[Telegram Notification] Notification sent successfully.');
+    } catch (error: any) {
+        console.error(`[Telegram Notification] Failed to send notification:`, error.response?.body || error.message || error);
+    }
+}
 
 
 /**
- * Uploads a file to the Google File API using the global axios instance.
+ * Uploads a file to the Google File API.
  * Returns the file name (relative path) and full URI upon successful upload.
  */
-async function uploadFileToGoogleApi(filePath: string, mimeType: string, displayName: string): Promise<{ name: string, uri: string }> {
-    console.log(`[uploadFileToGoogleApi] Starting upload for: ${filePath}, MIME: ${mimeType}`);
-    const stats = await fs.stat(filePath);
-    const numBytes = stats.size;
+async function uploadFileToGoogleApi(filePath: string, mimeType: string, displayName: string, fileSize: number): Promise<{ name: string, uri: string }> {
+    console.log(`[uploadFileToGoogleApi] Starting upload for: ${filePath}, MIME: ${mimeType}, Size: ${fileSize} bytes`);
+    // const stats = await fs.stat(filePath); // Size is already passed in
+    const numBytes = fileSize;
 
     if (numBytes === 0) {
         throw new Error(`File is empty and cannot be uploaded: ${filePath}`);
@@ -182,7 +304,7 @@ async function uploadFileToGoogleApi(filePath: string, mimeType: string, display
             },
              maxBodyLength: Infinity,
              maxContentLength: Infinity,
-             timeout: REQUEST_TIMEOUT * 5,
+             timeout: REQUEST_TIMEOUT * 20,
         };
         const uploadResponse = await axios.post<FileApiResponse>(uploadUrl, fileData, uploadConfig);
 
@@ -214,11 +336,14 @@ async function uploadFileToGoogleApi(filePath: string, mimeType: string, display
 
 /**
  * Polls the Google File API for the status of a file until it's ACTIVE or failed/timed out.
+ * Sends notifications upon successful activation if configured, including original source and timestamp.
+ * Requires mimeType for the notification message.
  */
-async function pollFileStatus(fileName: string): Promise<void> {
-    console.log(`[pollFileStatus] Starting polling for file: ${fileName}`);
-    const getFileUrl = `${GEMINI_API_URL}/v1beta/${fileName}?key=${GEMINI_API_KEY}`;
+async function pollFileStatusAndNotify(fileName: string, fullUri: string, mimeType: string, originalSource: string): Promise<void> {
+    console.log(`[pollFileStatus] Starting polling for file: ${fileName} (URI: ${fullUri}, Original: ${originalSource})`);
+    const getFileUrl = `${GEMINI_API_URL}/v1beta/${fileName}?key=${GEMINI_API_KEY}`; // Use relative name for polling URL
     let attempts = 0;
+    let apiUpdateTime: string | undefined; // To store the success timestamp from API
 
     while (attempts < MAX_FILE_POLLING_ATTEMPTS) {
         attempts++;
@@ -231,26 +356,50 @@ async function pollFileStatus(fileName: string): Promise<void> {
             console.log(`[pollFileStatus] File ${fileName} state: ${fileState}`);
 
             if (fileState === 'ACTIVE') {
-                console.log(`[pollFileStatus] File ${fileName} is ACTIVE.`);
-                return;
+                apiUpdateTime = response.data.updateTime; // Capture the update time
+                console.log(`[pollFileStatus] File ${fileName} is ACTIVE. Update Time: ${apiUpdateTime}`);
+                // Send notifications now that the file is ready
+                const successTime = apiUpdateTime ? new Date(apiUpdateTime).toLocaleString() : 'N/A';
+                const notificationMessage = `File ready for Gemini:\nOriginal: \`${originalSource}\`\nURI: \`${fullUri}\`\nMIME Type: \`${mimeType}\`\nReady At: \`${successTime}\``;
+                await sendOneBotNotification(notificationMessage);
+                await sendTelegramNotification(notificationMessage);
+                return; // Success
             } else if (fileState === 'FAILED') {
+                apiUpdateTime = response.data.updateTime; // Capture update time even on failure
                 console.error(`[pollFileStatus] File ${fileName} processing failed. Response:`, response.data);
+                const failureTime = apiUpdateTime ? new Date(apiUpdateTime).toLocaleString() : 'N/A';
+                const failureMessage = `File processing failed:\nOriginal: \`${originalSource}\`\nURI: \`${fullUri}\`\nMIME Type: \`${mimeType}\`\nFailed At: \`${failureTime}\``;
+                await sendOneBotNotification(failureMessage);
+                await sendTelegramNotification(failureMessage);
                 throw new Error(`Processing failed for file ${fileName}.`);
+            } else if (fileState === 'PROCESSING') {
+                 // Continue polling
+                 console.log(`[pollFileStatus] File ${fileName} is still PROCESSING.`);
+            } else {
+                 console.warn(`[pollFileStatus] File ${fileName} has unexpected state: ${fileState}. Continuing polling.`);
             }
 
         } catch (pollError: unknown) {
              const err = pollError as any;
-             console.error(`[pollFileStatus] Error polling status for ${fileName}:`, err.response?.data || err.message || pollError);
+             // Don't throw immediately on poll error, just log and retry
+             console.error(`[pollFileStatus] Error polling status for ${fileName} (Attempt ${attempts}):`, err.response?.data || err.message || pollError);
         }
 
+        // Check timeout condition *after* potential error logging
+        // Check timeout condition *after* potential error logging
         if (attempts >= MAX_FILE_POLLING_ATTEMPTS) {
             console.error(`[pollFileStatus] Polling timed out for file ${fileName} after ${MAX_FILE_POLLING_ATTEMPTS} attempts.`);
+            const timeoutMessage = `Polling timed out for file:\nOriginal: \`${originalSource}\`\nURI: \`${fullUri}\`\nMIME Type: \`${mimeType}\``;
+            await sendOneBotNotification(timeoutMessage);
+            await sendTelegramNotification(timeoutMessage);
             throw new Error(`Polling timed out for file ${fileName}. It did not become ACTIVE.`);
         }
 
         await delay(FILE_POLLING_INTERVAL_MS);
     }
 }
+
+
 
 
 /**
@@ -263,138 +412,262 @@ export async function handleUnderstandMedia(
     const { text, files } = params;
     const tempSubDir = 'tmp';
 
-    const processedFiles: ProcessedFileInfo[] = [];
-    const cleanupPaths: string[] = [];
-    const filesToPoll: string[] = [];
+    const processedFiles: ProcessedFileInfo[] = []; // Store info for final Gemini call
+    const cleanupPaths: string[] = []; // Local paths to delete after use
+    // Store more info for polling/notification
+    const filesToPollAndNotify: Array<{ name: string, fullUri: string, mimeType: string, originalSource: string }> = [];
 
     try {
         console.log(`[understandMedia] Received request with text: "${text}" and ${files.length} file(s).`);
 
         // --- 1. Process each file input ---
-        const processingPromises = files.map(async (fileSource) => {
-            const originalSource = fileSource.url || fileSource.path || fileSource.file_uri || 'unknown';
+        const processingPromises = files.map(async (fileSource, index) => {
+            const originalSource = fileSource.url || fileSource.path || fileSource.file_uri || `unknown_file_${index}`;
             let mimeType: string | undefined = fileSource.mime_type;
-            let fileName: string | undefined; // Relative path 'files/xxx' used for polling
-            let fullFileUri: string | undefined; // Full HTTPS URI for generateContent
+            let localFilePath: string | null = null;
+            let isTemp = false;
+            let fileSize = 0;
 
-            // --- Handle pre-uploaded file_uri (which is the full URI) ---
+            console.log(`[understandMedia] Processing file ${index + 1}: ${originalSource}`);
+
+            // --- A. Handle pre-uploaded file_uri ---
             if (fileSource.file_uri && mimeType) {
-                console.log(`[understandMedia] Using pre-uploaded file URI: ${fileSource.file_uri} with MIME type: ${mimeType}`);
-                fullFileUri = fileSource.file_uri; // The input is the full URI
-                // Extract the relative path (name) from the full URI for potential use (e.g., logging)
-                try {
-                    const urlParts = fullFileUri.split('/');
-                    const fileId = urlParts[urlParts.length - 1]; // Get the last part
-                    if (fileId) {
-                        fileName = `files/${fileId}`; // Reconstruct the relative name format
-                        console.log(`[understandMedia] Extracted relative name: ${fileName} from URI: ${fullFileUri}`);
-                    } else {
-                         console.warn(`[understandMedia] Could not extract relative name from provided file_uri: ${fullFileUri}`);
-                    }
-                } catch (e) {
-                     console.warn(`[understandMedia] Error extracting relative name from file_uri ${fullFileUri}:`, e);
+                console.log(`[understandMedia] Using pre-uploaded file URI: ${fileSource.file_uri}`);
+                if (!SUPPORTED_MIME_TYPES.has(mimeType)) {
+                    throw new Error(`Unsupported MIME type '${mimeType}' for pre-uploaded file: ${originalSource}.`);
                 }
-                // No polling needed for pre-uploaded files
+                // Pre-uploaded files always use the File API approach in the final request
+                processedFiles.push({
+                    type: 'file_api',
+                    mimeType: mimeType,
+                    originalSource: originalSource,
+                    fullUri: fileSource.file_uri, // The input is the full URI
+                    // Extract relative name if possible, for consistency (though not strictly needed for polling here)
+                    name: fileSource.file_uri.split('/').pop() ? `files/${fileSource.file_uri.split('/').pop()}` : undefined
+                });
+                // No polling needed here as it's assumed to be ACTIVE if provided.
+                // No size check needed.
             }
-            // --- Handle url or path (requires upload) ---
-            else if (fileSource.url || fileSource.path) {
-                let localFilePath: string | null = null;
-                let isTemp = false;
+            // --- B. Handle URL (check for YouTube first) ---
+            else if (fileSource.url) {
+                const url = fileSource.url;
+                console.log(`[understandMedia] Processing URL: ${url}`);
 
-                if (fileSource.url) {
-                    console.log(`[understandMedia] Downloading media from URL: ${fileSource.url}`);
-                    localFilePath = await downloadFile(fileSource.url, DEFAULT_OUTPUT_DIR, tempSubDir, 'downloaded_media');
+                // Check if it's a YouTube URL
+                if (YOUTUBE_URL_REGEX.test(url)) {
+                    console.log(`[understandMedia] Detected YouTube URL: ${url}. Skipping download and upload.`);
+                    processedFiles.push({
+                        type: 'youtube',
+                        originalSource: url,
+                        youtubeUrl: url // Store the URL to be used directly in file_data.file_uri
+                    });
+                    // No MIME type, size check, upload, or polling needed for YouTube URLs
+                } else {
+                    // It's a regular URL, proceed with download and processing
+                    console.log(`[understandMedia] Downloading media from URL: ${url}`);
+                    localFilePath = await downloadFile(url, DEFAULT_OUTPUT_DIR, tempSubDir, `downloaded_media_${index}`);
                     isTemp = true;
-                    cleanupPaths.push(localFilePath);
+                    cleanupPaths.push(localFilePath); // Mark for cleanup
                     console.log(`[understandMedia] Media downloaded to: ${localFilePath}`);
-                } else if (fileSource.path) {
-                    await fs.access(fileSource.path);
-                    localFilePath = path.resolve(fileSource.path);
-                    console.log(`[understandMedia] Using local file: ${localFilePath}`);
+
+                    // Get MIME type for downloaded file
+                    const lookupResult = mime.lookup(localFilePath);
+                    mimeType = lookupResult === false ? undefined : lookupResult;
+                    if (!mimeType) {
+                        throw new Error(`Could not determine MIME type for downloaded file: ${localFilePath}`);
+                    }
+                    // Correct MP3 MIME type if necessary
+                    const fileExt = path.extname(localFilePath).toLowerCase();
+                    if (fileExt === '.mp3' && mimeType === 'audio/mpeg') {
+                        console.log(`[understandMedia] Correcting MIME type for .mp3 file from 'audio/mpeg' to 'audio/mp3'.`);
+                        mimeType = 'audio/mp3';
+                    }
+
+                    // Validate MIME type
+                    if (!SUPPORTED_MIME_TYPES.has(mimeType)) {
+                        throw new Error(`Unsupported file type '${mimeType}' for source URL: ${originalSource}.`);
+                    }
+                    console.log(`[understandMedia] Validated MIME type: ${mimeType} for source URL: ${originalSource}`);
+
+                    // Get file size
+                    const stats = await fs.stat(localFilePath);
+                    fileSize = stats.size;
+                    if (fileSize === 0) {
+                        throw new Error(`Downloaded file is empty: ${localFilePath}`);
+                    }
+                    console.log(`[understandMedia] File size: ${fileSize} bytes for ${localFilePath}`);
+
+                    // --- Decide: Inline vs. File API for downloaded file ---
+                    if (fileSize <= MAX_INLINE_FILE_SIZE_BYTES) {
+                        console.log(`[understandMedia] File size (${fileSize} bytes) is within limit. Using inline data.`);
+                        const fileData = await fs.readFile(localFilePath);
+                        const base64Data = fileData.toString('base64');
+                        processedFiles.push({
+                            type: 'inline',
+                            mimeType: mimeType,
+                            originalSource: originalSource,
+                            base64Data: base64Data
+                        });
+                    } else {
+                        console.log(`[understandMedia] File size (${fileSize} bytes) exceeds limit. Uploading via File API.`);
+                        const displayName = path.basename(localFilePath);
+                        const uploadResult = await uploadFileToGoogleApi(localFilePath, mimeType, displayName, fileSize);
+                        processedFiles.push({
+                            type: 'file_api',
+                            mimeType: mimeType,
+                            originalSource: originalSource,
+                            name: uploadResult.name,
+                            fullUri: uploadResult.uri
+                        });
+                        filesToPollAndNotify.push({
+                            name: uploadResult.name,
+                            fullUri: uploadResult.uri,
+                            mimeType: mimeType,
+                            originalSource: originalSource
+                        });
+                    }
                 }
+            }
+            // --- C. Handle local path ---
+            else if (fileSource.path) {
+                await fs.access(fileSource.path); // Check existence
+                localFilePath = path.resolve(fileSource.path);
+                console.log(`[understandMedia] Using local file: ${localFilePath}`);
 
-                if (!localFilePath) throw new Error(`Invalid file source object: ${JSON.stringify(fileSource)}`);
-
+                // Get MIME type for local file
                 const lookupResult = mime.lookup(localFilePath);
                 mimeType = lookupResult === false ? undefined : lookupResult;
-
                 if (!mimeType) {
-                    if (isTemp) await deleteFile(localFilePath).catch(e => console.error(`[understandMedia] Error cleaning up temp file ${localFilePath} after MIME type failure:`, e));
                     throw new Error(`Could not determine MIME type for file: ${localFilePath}`);
                 }
-
+                // Correct MP3 MIME type if necessary
                 const fileExt = path.extname(localFilePath).toLowerCase();
                 if (fileExt === '.mp3' && mimeType === 'audio/mpeg') {
                     console.log(`[understandMedia] Correcting MIME type for .mp3 file from 'audio/mpeg' to 'audio/mp3'.`);
                     mimeType = 'audio/mp3';
                 }
 
-                // Upload the file
-                const displayName = path.basename(localFilePath);
-                const uploadResult = await uploadFileToGoogleApi(localFilePath, mimeType, displayName);
-                // Store both the relative name (for polling) and the full URI (for generateContent)
-                fileName = uploadResult.name;
-                fullFileUri = uploadResult.uri; // Use the full URI returned by the upload API
-                filesToPoll.push(fileName); // Poll using the relative name
-            } else {
-                 throw new Error(`Invalid file source object, missing url, path, or file_uri/mime_type: ${JSON.stringify(fileSource)}`);
+                // Validate MIME type
+                if (!SUPPORTED_MIME_TYPES.has(mimeType)) {
+                    throw new Error(`Unsupported file type '${mimeType}' for source path: ${originalSource}.`);
+                }
+                console.log(`[understandMedia] Validated MIME type: ${mimeType} for source path: ${originalSource}`);
+
+                // Get file size
+                const stats = await fs.stat(localFilePath);
+                fileSize = stats.size;
+                if (fileSize === 0) {
+                    throw new Error(`File is empty: ${localFilePath}`);
+                }
+                console.log(`[understandMedia] File size: ${fileSize} bytes for ${localFilePath}`);
+
+                // --- Decide: Inline vs. File API ---
+                if (fileSize <= MAX_INLINE_FILE_SIZE_BYTES) {
+                    // Use Inline Data
+                    console.log(`[understandMedia] File size (${fileSize} bytes) is within limit (${MAX_INLINE_FILE_SIZE_BYTES} bytes). Using inline data.`);
+                    const fileData = await fs.readFile(localFilePath);
+                    const base64Data = fileData.toString('base64');
+                    processedFiles.push({
+                        type: 'inline',
+                        mimeType: mimeType,
+                        originalSource: originalSource,
+                        base64Data: base64Data
+                    });
+                    // No polling needed for inline data
+                } else {
+                    // Use File API (Upload)
+                    console.log(`[understandMedia] File size (${fileSize} bytes) exceeds limit (${MAX_INLINE_FILE_SIZE_BYTES} bytes). Uploading via File API.`);
+                    const displayName = path.basename(localFilePath);
+                    const uploadResult = await uploadFileToGoogleApi(localFilePath, mimeType, displayName, fileSize);
+                    processedFiles.push({
+                        type: 'file_api',
+                        mimeType: mimeType,
+                        originalSource: originalSource,
+                        name: uploadResult.name, // Relative name
+                        fullUri: uploadResult.uri // Full URI
+                    });
+                    // Mark this file for polling *after* upload completes, including original source
+                    filesToPollAndNotify.push({
+                        name: uploadResult.name,
+                        fullUri: uploadResult.uri,
+                        mimeType: mimeType,
+                        originalSource: originalSource // Pass original source for notification
+                    });
+                }
             }
-
-            // Validate MIME type *after* potential correction and before adding
-            if (!mimeType || !SUPPORTED_MIME_TYPES.has(mimeType)) {
-                 throw new Error(`Unsupported file type '${mimeType || 'unknown'}' for source: ${originalSource}.`);
+            // --- D. Handle invalid input ---
+            else {
+                throw new Error(`Invalid file source object, missing url, path, or file_uri/mime_type: ${JSON.stringify(fileSource)}`);
             }
-            console.log(`[understandMedia] Validated MIME type: ${mimeType} for source: ${originalSource}`);
-
-            if (!fullFileUri) { // Check if we have the full URI now
-                 throw new Error(`Failed to obtain the full file URI for source: ${originalSource}`);
-            }
-
-            // Store the full URI needed for generateContent
-            processedFiles.push({ name: fileName, fullUri: fullFileUri, mimeType: mimeType, originalSource: originalSource });
-
         }); // End map
 
+        // Wait for all initial processing (downloads, size checks, potential uploads)
         await Promise.all(processingPromises);
 
-
+        // --- Validation after processing ---
         if (processedFiles.length !== files.length) {
-             throw new Error("Some files failed during processing or upload.");
+            throw new Error("Some files failed during initial processing or upload.");
         }
         if (processedFiles.length === 0) {
-            throw new Error("No files were successfully processed.");
+            throw new Error("No files were successfully processed to be sent to Gemini.");
         }
 
-        // --- 2. Poll for ACTIVE status for newly uploaded files ---
-        if (filesToPoll.length > 0) {
-            console.log(`[understandMedia] Polling status for ${filesToPoll.length} newly uploaded file(s)...`);
-            const pollingPromises = filesToPoll.map(name => pollFileStatus(name));
-            await Promise.all(pollingPromises);
-            console.log(`[understandMedia] All newly uploaded files are ACTIVE.`);
+        // --- 2. Poll for ACTIVE status and Notify for files uploaded via API ---
+        if (filesToPollAndNotify.length > 0) {
+            console.log(`[understandMedia] Polling status for ${filesToPollAndNotify.length} newly uploaded file(s)...`);
+            const pollingPromises = filesToPollAndNotify.map(fileInfo =>
+                // Pass originalSource to the polling function
+                pollFileStatusAndNotify(fileInfo.name, fileInfo.fullUri, fileInfo.mimeType, fileInfo.originalSource)
+            );
+            await Promise.all(pollingPromises); // Wait for all polling and notifications to complete or fail
+            console.log(`[understandMedia] Polling and notification process completed for all uploaded files.`);
         } else {
-             console.log(`[understandMedia] No new files were uploaded, skipping polling.`);
+            console.log(`[understandMedia] No new files were uploaded via File API, skipping polling and notifications.`);
         }
-
 
         // --- 3. Call Gemini Generate Content ---
         const generateContentUrl = `/v1beta/models/${GEMINI_UNDERSTANDING_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
-        console.log('[understandMedia] Processed files before mapping to request parts:', JSON.stringify(processedFiles, null, 2));
-
+        // Construct the parts array, mixing inline_data and file_data as needed
         const requestParts = [
-            { text: text },
-            // Use the stored full HTTPS URI here
-            ...processedFiles.map(fileInfo => ({
-                file_data: { mime_type: fileInfo.mimeType, file_uri: fileInfo.fullUri }
-            }))
+            { text: text }, // Always include the text prompt first
+            ...processedFiles.map(fileInfo => {
+                if (fileInfo.type === 'inline') {
+                    // Ensure mimeType and base64Data are present for inline type
+                    if (!fileInfo.mimeType || !fileInfo.base64Data) {
+                        throw new Error(`Internal error: Missing mimeType or base64Data for inline file: ${fileInfo.originalSource}`);
+                    }
+                    return { inline_data: { mime_type: fileInfo.mimeType, data: fileInfo.base64Data } };
+                } else if (fileInfo.type === 'file_api') {
+                    // Ensure mimeType and fullUri are present for file_api type
+                    if (!fileInfo.mimeType || !fileInfo.fullUri) {
+                        throw new Error(`Internal error: Missing mimeType or fullUri for file_api file: ${fileInfo.originalSource}`);
+                    }
+                    return { file_data: { mime_type: fileInfo.mimeType, file_uri: fileInfo.fullUri } };
+                } else { // type === 'youtube'
+                    // Ensure youtubeUrl is present for youtube type
+                    if (!fileInfo.youtubeUrl) {
+                        throw new Error(`Internal error: Missing youtubeUrl for youtube file: ${fileInfo.originalSource}`);
+                    }
+                    // For YouTube, use file_uri without mime_type
+                    return { file_data: { file_uri: fileInfo.youtubeUrl } };
+                }
+            })
         ];
         const requestPayload = { contents: [{ parts: requestParts }] };
 
-        console.log('[understandMedia] Final request payload:', JSON.stringify(requestPayload, null, 2));
+        // Log payload carefully - potentially large base64 data
+        console.log(`[understandMedia] Calling Gemini (${GEMINI_UNDERSTANDING_MODEL}) with ${processedFiles.length} file(s)...`);
+        // Avoid logging full base64 data in production if possible
+        // console.log('[understandMedia] Final request payload structure:', JSON.stringify(requestPayload, (key, value) => key === 'data' ? '<base64_data_omitted>' : value, 2));
 
 
-        console.log(`[understandMedia] Calling Gemini (${GEMINI_UNDERSTANDING_MODEL}) with ${processedFiles.length} file(s)... URL: ${axiosInstance.defaults.baseURL}${generateContentUrl}`);
-        const response = await axiosInstance.post(generateContentUrl, requestPayload, { timeout: REQUEST_TIMEOUT });
+        const response = await axiosInstance.post(generateContentUrl, requestPayload, {
+             timeout: REQUEST_TIMEOUT,
+             // Increase max content length for potentially large inline data payloads
+             maxBodyLength: Infinity,
+             maxContentLength: Infinity,
+        });
 
         // --- 4. Process Response ---
         const responseData = response.data as GeminiContentResponse;
@@ -434,10 +707,17 @@ export async function handleUnderstandMedia(
         // --- 5. Cleanup Downloaded Files ---
         if (cleanupPaths.length > 0) {
             console.log(`[understandMedia] Cleaning up ${cleanupPaths.length} downloaded temporary file(s)...`);
-            const results = await Promise.allSettled(cleanupPaths.map(tempPath => deleteFile(tempPath)));
+            const results = await Promise.allSettled(cleanupPaths.map(tempPath => deleteFile(tempPath).catch(e => {
+                 // Catch deletion errors within the map to prevent Promise.allSettled from hiding the original error
+                 console.error(`[understandMedia] Error during cleanup of ${tempPath}:`, e);
+                 throw e; // Re-throw to mark the settlement as rejected if needed, though logging might be sufficient
+            })));
             results.forEach((result, index) => {
                 if (result.status === 'rejected') {
-                    console.error(`[understandMedia] Failed to clean up downloaded file ${cleanupPaths[index]}:`, result.reason);
+                    // Error already logged in the catch block above
+                    // console.error(`[understandMedia] Failed to clean up downloaded file ${cleanupPaths[index]}:`, result.reason);
+                } else {
+                    console.log(`[understandMedia] Successfully cleaned up ${cleanupPaths[index]}`);
                 }
             });
         }

@@ -41,6 +41,18 @@ export const DEFAULT_OUTPUT_DIR = cliArgs.DEFAULT_OUTPUT_DIR || process.env.DEFA
 // --- Request Configuration ---
 export const REQUEST_TIMEOUT = parseInt(cliArgs.REQUEST_TIMEOUT || process.env.REQUEST_TIMEOUT || '180000', 10); // Default 180 seconds (3 minutes)
 
+// --- Notification Configuration (Optional) ---
+// OneBot v11 HTTP Notification
+export const ONEBOT_HTTP_URL = cliArgs.ONEBOT_HTTP_URL || process.env.ONEBOT_HTTP_URL;
+export const ONEBOT_ACCESS_TOKEN = cliArgs.ONEBOT_ACCESS_TOKEN || process.env.ONEBOT_ACCESS_TOKEN; // Optional access token
+export const ONEBOT_MESSAGE_TYPE = cliArgs.ONEBOT_MESSAGE_TYPE || process.env.ONEBOT_MESSAGE_TYPE as 'private' | 'group' | undefined; // 'private' or 'group'
+export const ONEBOT_TARGET_ID = cliArgs.ONEBOT_TARGET_ID || process.env.ONEBOT_TARGET_ID; // User ID (for private) or Group ID (for group)
+
+// Telegram Bot Notification
+export const TELEGRAM_BOT_TOKEN = cliArgs.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
+export const TELEGRAM_CHAT_ID = cliArgs.TELEGRAM_CHAT_ID || process.env.TELEGRAM_CHAT_ID;
+
+
 // --- Validation ---
 if (!GEMINI_API_KEY) {
     console.error('[gemini-integrator-mcp] Error: Gemini API key (GEMINI_API_KEY) is not configured.');
