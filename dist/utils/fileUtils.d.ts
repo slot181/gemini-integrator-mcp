@@ -21,19 +21,7 @@ export declare function generateUniqueFilename(prefix: string, extension: string
  * @param filePath The path to the file to delete.
  */
 export declare function deleteFile(filePath: string): Promise<void>;
-/**
- * Downloads a file from a URL to a specified directory.
- * Generates a unique filename based on prefix and detected/fallback extension.
- * Prioritizes Content-Type header, then URL path extension.
- *
- * @param url The URL of the file to download.
- * @param outputDir The base directory to save the downloaded file.
- * @param subfolder The subfolder within the output directory.
- * @param filenamePrefix Prefix for the generated unique filename.
- * @returns An object containing the full path to the downloaded file (`filePath`) and the detected Content-Type (`contentType`).
- * @throws If download fails or the response is not a success status.
- */
-export declare function downloadFile(url: string, outputDir: string, subfolder: string, filenamePrefix: string): Promise<{
+export declare function downloadFile(url: string, outputDir: string, subfolder: string, filenamePrefix: string, timeout?: number): Promise<{
     filePath: string;
     contentType: string | null;
 }>;

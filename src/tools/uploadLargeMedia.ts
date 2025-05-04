@@ -20,6 +20,7 @@ import {
 
 // --- Constants ---
 const MAX_FILE_SIZE_FOR_UNDERSTAND_MEDIA = 20 * 1024 * 1024; // 20MB limit for the *other* tool
+const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 
 // --- Helper function to delay execution ---
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -139,7 +140,7 @@ async function uploadFileToGoogleApi(filePath: string, mimeType: string, display
             },
              maxBodyLength: Infinity,
              maxContentLength: Infinity,
-             timeout: REQUEST_TIMEOUT * 20, // Longer timeout for large uploads
+             timeout: TWENTY_FOUR_HOURS_MS, // Set upload timeout to 24 hours
         };
         const uploadResponse = await axios.post<FileApiResponse>(uploadUrl, fileData, uploadConfig);
 
@@ -271,7 +272,7 @@ export async function handleUploadLargeMedia(
 ): Promise<{ content: Array<TextContent> }> {
     const { url, path: localInputPath } = params;
     const originalSource = url || localInputPath || 'unknown_source';
-    const tempSubDir = 'tmp_large';
+    const tempSubDir = 'tmp'; // Use 'tmp' subfolder within DEFAULT_OUTPUT_DIR
     let cleanupPath: string | null = null; // Single path to clean up if downloaded
 
     // --- 1. Check Notification Configuration ---
@@ -298,7 +299,8 @@ export async function handleUploadLargeMedia(
             // --- A. Handle URL Input ---
             if (url) {
                 console.log(`[uploadLargeMedia:background] Downloading from URL: ${url}`);
-                const downloadResult = await downloadFile(url, DEFAULT_OUTPUT_DIR, tempSubDir, `large_download`);
+                // Pass 24-hour timeout to downloadFile
+                const downloadResult = await downloadFile(url, DEFAULT_OUTPUT_DIR, tempSubDir, `large_download`, TWENTY_FOUR_HOURS_MS);
                 filePathToUpload = downloadResult.filePath;
                 cleanupPath = filePathToUpload; // Mark for cleanup
                 isTemp = true;

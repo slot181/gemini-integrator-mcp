@@ -9,6 +9,7 @@ import { deleteFile, downloadFile } from '../utils/fileUtils.js';
 import { sendOneBotNotification, sendTelegramNotification, isNotificationConfigured, getConfiguredNotifiers } from '../utils/notificationUtils.js';
 // --- Constants ---
 const MAX_FILE_SIZE_FOR_UNDERSTAND_MEDIA = 20 * 1024 * 1024; // 20MB limit for the *other* tool
+const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 // --- Helper function to delay execution ---
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // --- Polling Configuration ---
@@ -94,7 +95,7 @@ async function uploadFileToGoogleApi(filePath, mimeType, displayName, fileSize) 
             },
             maxBodyLength: Infinity,
             maxContentLength: Infinity,
-            timeout: REQUEST_TIMEOUT * 20, // Longer timeout for large uploads
+            timeout: TWENTY_FOUR_HOURS_MS, // Set upload timeout to 24 hours
         };
         const uploadResponse = await axios.post(uploadUrl, fileData, uploadConfig);
         if (uploadResponse.status !== 200 || !uploadResponse.data?.file?.uri || !uploadResponse.data?.file?.name) {
@@ -217,7 +218,7 @@ const SUPPORTED_MIME_TYPES = new Set([
 export async function handleUploadLargeMedia(params) {
     const { url, path: localInputPath } = params;
     const originalSource = url || localInputPath || 'unknown_source';
-    const tempSubDir = 'tmp_large';
+    const tempSubDir = 'tmp'; // Use 'tmp' subfolder within DEFAULT_OUTPUT_DIR
     let cleanupPath = null; // Single path to clean up if downloaded
     // --- 1. Check Notification Configuration ---
     if (!isNotificationConfigured()) {
@@ -240,7 +241,8 @@ export async function handleUploadLargeMedia(params) {
             // --- A. Handle URL Input ---
             if (url) {
                 console.log(`[uploadLargeMedia:background] Downloading from URL: ${url}`);
-                const downloadResult = await downloadFile(url, DEFAULT_OUTPUT_DIR, tempSubDir, `large_download`);
+                // Pass 24-hour timeout to downloadFile
+                const downloadResult = await downloadFile(url, DEFAULT_OUTPUT_DIR, tempSubDir, `large_download`, TWENTY_FOUR_HOURS_MS);
                 filePathToUpload = downloadResult.filePath;
                 cleanupPath = filePathToUpload; // Mark for cleanup
                 isTemp = true;

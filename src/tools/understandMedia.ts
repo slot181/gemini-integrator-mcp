@@ -14,18 +14,9 @@ import {
     // Notification config imports removed
 } from '../config.js';
 import { deleteFile, downloadFile } from '../utils/fileUtils.js';
-// Import notification utils if needed for other purposes (though likely not needed here anymore)
-// import { sendOneBotNotification, sendTelegramNotification } from '../utils/notificationUtils.js';
 
 // --- Constants ---
 const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024; // 20MB limit for this tool
-
-// --- Helper function to delay execution (Might not be needed anymore) ---
-// const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-// --- Polling Configuration (Removed) ---
-// const FILE_POLLING_INTERVAL_MS = 2000;
-// const MAX_FILE_POLLING_ATTEMPTS = 90;
 
 // Schema for a single file source (URL or Path)
 const fileSourceSchema = z.object({
@@ -77,10 +68,6 @@ interface FileInfo {
         videoDuration: { seconds: string; nanos: number }; // Changed seconds to string based on potential API responses
     };
 }
-interface FileApiResponse {
-    file: FileInfo;
-}
-interface GetFileApiResponse extends FileInfo {}
 
 // --- Gemini Generate Content Response Interface ---
 interface GeminiContentResponse {
@@ -180,6 +167,26 @@ export async function handleUnderstandMedia(
     try {
         console.log(`[understandMedia] Received request with text: "${text}" and ${files.length} file(s). Max size per file: ${MAX_FILE_SIZE_BYTES} bytes.`);
 
+        // --- Pre-check: Count video files ---
+        let videoCount = 0;
+        for (const fileSource of files) {
+            if (fileSource.url && YOUTUBE_URL_REGEX.test(fileSource.url)) {
+                videoCount++;
+            } else if (fileSource.mime_type?.startsWith('video/')) { // Check pre-uploaded MIME type
+                videoCount++;
+            }
+            // Note: We can't reliably check MIME type for non-pre-uploaded URLs/paths here without downloading/lookup first.
+            // The primary check will happen after determining MIME types during processing.
+            // However, checking YouTube URLs and pre-uploaded types early catches some cases.
+        }
+
+        if (videoCount > 1) {
+             throw new Error("Invalid request: Only one video file (including YouTube URLs or video MIME types) can be processed per request.");
+        }
+        // Reset video count for the main processing loop check
+        videoCount = 0;
+
+
         // --- 1. Process each file input ---
         const processingPromises = files.map(async (fileSource, index) => {
             const originalSource = fileSource.url || fileSource.path || fileSource.file_uri || `unknown_file_${index}`;
@@ -220,8 +227,30 @@ export async function handleUnderstandMedia(
                     });
                     // No MIME type, size check, upload, or polling needed for YouTube URLs
                 } else {
-                    // It's a regular URL, proceed with download and processing
+                    // It's a regular URL, try HEAD request first to check size
+                    console.log(`[understandMedia] Checking size for URL via HEAD request: ${url}`);
+                    let headFileSize: number | null = null;
+                    try {
+                        const headResponse = await axios.head(url, { timeout: REQUEST_TIMEOUT / 2 }); // Shorter timeout for HEAD
+                        const contentLengthHeader = headResponse.headers['content-length'];
+                        if (contentLengthHeader && /^\d+$/.test(contentLengthHeader)) {
+                            headFileSize = parseInt(contentLengthHeader, 10);
+                            console.log(`[understandMedia] HEAD request successful. Content-Length: ${headFileSize} bytes.`);
+                            // Check size immediately if HEAD request was successful
+                            if (headFileSize > MAX_FILE_SIZE_BYTES) {
+                                throw new Error(`File from URL '${originalSource}' is too large (${headFileSize} bytes > ${MAX_FILE_SIZE_BYTES} bytes based on Content-Length). Please use the 'uploadLargeMedia' tool for files larger than 20MB.`);
+                            }
+                        } else {
+                            console.warn(`[understandMedia] HEAD request for ${url} did not return a valid Content-Length header. Proceeding with download to check size.`);
+                        }
+                    } catch (headError: any) {
+                        console.warn(`[understandMedia] HEAD request failed for ${url} (Error: ${headError.message}). Proceeding with download to check size.`);
+                        // Proceed to download if HEAD fails
+                    }
+
+                    // If HEAD request didn't throw an error due to size, proceed to download
                     console.log(`[understandMedia] Downloading media from URL: ${url}`);
+                    // Use the default timeout for the actual download
                     const downloadResult = await downloadFile(url, DEFAULT_OUTPUT_DIR, tempSubDir, `downloaded_media_${index}`);
                     localFilePath = downloadResult.filePath; // Get the path from the result
                     const downloadedContentType = downloadResult.contentType; // Get the Content-Type from the result
@@ -256,20 +285,30 @@ export async function handleUnderstandMedia(
                     }
                     console.log(`[understandMedia] Validated MIME type: ${mimeType} for source URL: ${originalSource}`);
 
-                    // Get file size
+                    // --- Check Video Count (after determining MIME type) ---
+                    if (mimeType.startsWith('video/')) {
+                        videoCount++;
+                        if (videoCount > 1) {
+                            throw new Error("Invalid request: Only one video file can be processed per request. Multiple video files detected after processing.");
+                        }
+                    }
+
+                    // Get file size *after* download (as fallback or confirmation)
                     const stats = await fs.stat(localFilePath);
                     fileSize = stats.size;
                     if (fileSize === 0) {
                         throw new Error(`Downloaded file is empty: ${localFilePath}`);
                     }
-                    console.log(`[understandMedia] File size: ${fileSize} bytes for ${localFilePath}`);
+                    console.log(`[understandMedia] Downloaded file size: ${fileSize} bytes for ${localFilePath}`);
 
-                    // --- Check Size ---
+                    // --- Check Size Again (important if HEAD failed) ---
                     if (fileSize > MAX_FILE_SIZE_BYTES) {
+                         // This case should ideally be caught by HEAD, but handles HEAD failures or inaccurate Content-Length
+                        console.warn(`[understandMedia] File size check after download indicates file is too large (${fileSize} > ${MAX_FILE_SIZE_BYTES}). This might happen if HEAD request failed or Content-Length was inaccurate.`);
                         throw new Error(`File from URL '${originalSource}' is too large (${fileSize} bytes > ${MAX_FILE_SIZE_BYTES} bytes). Please use the 'uploadLargeMedia' tool for files larger than 20MB.`);
                     }
 
-                    // --- Use Inline Data (since size is within limit) ---
+                    // --- Use Inline Data (since size is confirmed to be within limit) ---
                     console.log(`[understandMedia] File size (${fileSize} bytes) is within limit. Using inline data.`);
                     const fileData = await fs.readFile(localFilePath);
                     const base64Data = fileData.toString('base64');
@@ -302,13 +341,21 @@ export async function handleUnderstandMedia(
                     mimeType = 'audio/mp3';
                 }
 
-                // Validate MIME type
-                if (!SUPPORTED_MIME_TYPES.has(mimeType)) {
-                    throw new Error(`Unsupported file type '${mimeType}' for source path: ${originalSource}.`);
-                }
-                console.log(`[understandMedia] Validated MIME type: ${mimeType} for source path: ${originalSource}`);
+                    // Validate MIME type
+                    if (!SUPPORTED_MIME_TYPES.has(mimeType)) {
+                        throw new Error(`Unsupported file type '${mimeType}' for source path: ${originalSource}.`);
+                    }
+                    console.log(`[understandMedia] Validated MIME type: ${mimeType} for source path: ${originalSource}`);
 
-                // Get file size
+                    // --- Check Video Count (after determining MIME type) ---
+                     if (mimeType.startsWith('video/')) {
+                        videoCount++;
+                        if (videoCount > 1) {
+                            throw new Error("Invalid request: Only one video file can be processed per request. Multiple video files detected after processing.");
+                        }
+                    }
+
+                    // Get file size
                 const stats = await fs.stat(localFilePath);
                 fileSize = stats.size;
                 if (fileSize === 0) {

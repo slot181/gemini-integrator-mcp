@@ -82,10 +82,19 @@ function isAsyncIterable(obj: any): obj is AsyncIterable<any> {
  * @param outputDir The base directory to save the downloaded file.
  * @param subfolder The subfolder within the output directory.
  * @param filenamePrefix Prefix for the generated unique filename.
+ * @param timeout Optional timeout in milliseconds for the download request. Defaults to 24 hours.
  * @returns An object containing the full path to the downloaded file (`filePath`) and the detected Content-Type (`contentType`).
  * @throws If download fails or the response is not a success status.
  */
-export async function downloadFile(url: string, outputDir: string, subfolder: string, filenamePrefix: string): Promise<{ filePath: string; contentType: string | null }> {
+const DEFAULT_DOWNLOAD_TIMEOUT = 24 * 60 * 60 * 1000; // 24 hours in ms
+
+export async function downloadFile(
+    url: string,
+    outputDir: string,
+    subfolder: string,
+    filenamePrefix: string,
+    timeout: number = DEFAULT_DOWNLOAD_TIMEOUT // Add timeout parameter with default
+): Promise<{ filePath: string; contentType: string | null }> {
     const fullDirPath = path.resolve(outputDir, subfolder);
     await fs.mkdir(fullDirPath, { recursive: true });
 
@@ -98,7 +107,7 @@ export async function downloadFile(url: string, outputDir: string, subfolder: st
             url,
             method: 'GET',
             responseType: 'stream',
-            timeout: REQUEST_TIMEOUT * 2, // Allow longer timeout for downloads
+            timeout: timeout, // Use the provided or default timeout
         });
 
         if (response.status < 200 || response.status >= 300) {
