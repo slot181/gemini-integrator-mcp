@@ -3,7 +3,6 @@ import * as fsSync from 'fs'; // Import sync fs for createWriteStream
 import * as path from 'path';
 import axios from 'axios'; // Need axios for downloading
 import { Stream } from 'stream'; // For stream typing
-import * as crypto from 'crypto'; // For temp filenames
 import { REQUEST_TIMEOUT } from '../config.js'; // Import timeout
 import * as mime from 'mime-types'; // Import mime-types for fallback lookup
 
@@ -83,10 +82,10 @@ function isAsyncIterable(obj: any): obj is AsyncIterable<any> {
  * @param outputDir The base directory to save the downloaded file.
  * @param subfolder The subfolder within the output directory.
  * @param filenamePrefix Prefix for the generated unique filename.
- * @returns The full path to the downloaded file.
+ * @returns An object containing the full path to the downloaded file (`filePath`) and the detected Content-Type (`contentType`).
  * @throws If download fails or the response is not a success status.
  */
-export async function downloadFile(url: string, outputDir: string, subfolder: string, filenamePrefix: string): Promise<string> {
+export async function downloadFile(url: string, outputDir: string, subfolder: string, filenamePrefix: string): Promise<{ filePath: string; contentType: string | null }> {
     const fullDirPath = path.resolve(outputDir, subfolder);
     await fs.mkdir(fullDirPath, { recursive: true });
 
@@ -122,30 +121,28 @@ export async function downloadFile(url: string, outputDir: string, subfolder: st
         }
 
         let extension = '.tmp'; // Default extension
-        const contentType = response.headers['content-type'];
-        let contentTypeValid = false;
+        const responseContentTypeHeader = response.headers['content-type'] as string | undefined;
+        let detectedMimeType: string | null = null; // Store the detected MIME type
 
-        // 1. Try Content-Type Header
-        if (contentType) {
-            const mainType = contentType.split(';')[0].trim();
-            const guessedExtension = mime.extension(mainType);
+        // 1. Prioritize Content-Type Header
+        if (responseContentTypeHeader) {
+            detectedMimeType = responseContentTypeHeader.split(';')[0].trim(); // Extract main type
+            console.log(`[fileUtils] Found Content-Type header: ${detectedMimeType}`);
+            const guessedExtension = mime.extension(detectedMimeType);
             if (guessedExtension) {
-                if (!mainType.startsWith('application/') || mainType === 'application/pdf') {
-                     extension = `.${guessedExtension}`;
-                     contentTypeValid = true;
-                     console.log(`[fileUtils] Determined extension '${extension}' from Content-Type: ${contentType}`);
-                } else {
-                    console.warn(`[fileUtils] Content-Type '${contentType}' seems invalid for media, ignoring for extension.`);
-                }
+                // Use extension from valid Content-Type
+                extension = `.${guessedExtension}`;
+                console.log(`[fileUtils] Using extension '${extension}' based on Content-Type.`);
             } else {
-                 console.warn(`[fileUtils] Could not determine extension from Content-Type: ${contentType}`);
+                console.warn(`[fileUtils] Could not determine a valid extension from Content-Type: ${detectedMimeType}. Will try URL path.`);
+                // Keep detectedMimeType, but try URL for extension
             }
         } else {
-             console.warn(`[fileUtils] Content-Type header missing in download response.`);
+             console.warn(`[fileUtils] Content-Type header missing in download response. Will try URL path for extension.`);
         }
 
-        // 2. Try URL Path Extension (if Content-Type was invalid or missing)
-        if (!contentTypeValid) {
+        // 2. Try URL Path Extension (if Content-Type didn't provide a good extension)
+        if (extension === '.tmp') { // Only try URL if Content-Type didn't yield a good extension
             try {
                 const parsedUrl = new URL(url);
                 const pathExtension = path.extname(parsedUrl.pathname).toLowerCase();
@@ -183,7 +180,8 @@ export async function downloadFile(url: string, outputDir: string, subfolder: st
         });
 
         console.log(`[fileUtils] File downloaded successfully to: ${finalFilePath}`);
-        return finalFilePath;
+        // Return both path and the detected Content-Type (or null if none found)
+        return { filePath: finalFilePath, contentType: detectedMimeType };
 
     } catch (error: unknown) {
         console.error(`[fileUtils] Failed to download file from ${url}:`, error);

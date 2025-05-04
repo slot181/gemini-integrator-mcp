@@ -30,7 +30,10 @@ export declare function deleteFile(filePath: string): Promise<void>;
  * @param outputDir The base directory to save the downloaded file.
  * @param subfolder The subfolder within the output directory.
  * @param filenamePrefix Prefix for the generated unique filename.
- * @returns The full path to the downloaded file.
+ * @returns An object containing the full path to the downloaded file (`filePath`) and the detected Content-Type (`contentType`).
  * @throws If download fails or the response is not a success status.
  */
-export declare function downloadFile(url: string, outputDir: string, subfolder: string, filenamePrefix: string): Promise<string>;
+export declare function downloadFile(url: string, outputDir: string, subfolder: string, filenamePrefix: string): Promise<{
+    filePath: string;
+    contentType: string | null;
+}>;

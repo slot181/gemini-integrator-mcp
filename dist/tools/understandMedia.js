@@ -115,26 +115,27 @@ async function sendOneBotNotification(message) {
         if (ONEBOT_ACCESS_TOKEN) {
             headers['Authorization'] = `Bearer ${ONEBOT_ACCESS_TOKEN}`;
         }
-        let payload;
+        let action;
+        let params;
         if (ONEBOT_MESSAGE_TYPE === 'private') {
-            payload = {
-                action: 'send_private_msg',
-                params: {
-                    user_id: ONEBOT_TARGET_ID,
-                    message: message
-                }
+            action = 'send_private_msg';
+            params = {
+                user_id: parseInt(ONEBOT_TARGET_ID, 10), // Convert ID to number
+                message: message
             };
         }
         else { // ONEBOT_MESSAGE_TYPE === 'group'
-            payload = {
-                action: 'send_group_msg',
-                params: {
-                    group_id: ONEBOT_TARGET_ID,
-                    message: message
-                }
+            action = 'send_group_msg';
+            params = {
+                group_id: parseInt(ONEBOT_TARGET_ID, 10), // Convert ID to number
+                message: message
             };
         }
-        await axios.post(ONEBOT_HTTP_URL, payload, {
+        // Construct URL with action as path, removing potential trailing slash from base URL
+        const requestUrl = `${ONEBOT_HTTP_URL.replace(/\/$/, '')}/${action}`;
+        console.log(`[OneBot Notification] Sending POST to ${requestUrl}`);
+        // Send params directly as the request body
+        await axios.post(requestUrl, params, {
             headers,
             timeout: REQUEST_TIMEOUT / 2 // Use a shorter timeout for notifications
         });
@@ -273,9 +274,9 @@ async function pollFileStatusAndNotify(fileName, fullUri, mimeType, originalSour
             if (fileState === 'ACTIVE') {
                 apiUpdateTime = response.data.updateTime; // Capture the update time
                 console.log(`[pollFileStatus] File ${fileName} is ACTIVE. Update Time: ${apiUpdateTime}`);
-                // Send notifications now that the file is ready
+                // Send notifications now that the file is ready, re-adding emojis
                 const successTime = apiUpdateTime ? new Date(apiUpdateTime).toLocaleString() : 'N/A';
-                const notificationMessage = `File ready for Gemini:\nOriginal: \`${originalSource}\`\nURI: \`${fullUri}\`\nMIME Type: \`${mimeType}\`\nReady At: \`${successTime}\``;
+                const notificationMessage = `✅ File ready for Gemini:\nOriginal: \`${originalSource}\`\nURI: \`${fullUri}\`\nMIME Type: \`${mimeType}\`\nReady At: \`${successTime}\``;
                 await sendOneBotNotification(notificationMessage);
                 await sendTelegramNotification(notificationMessage);
                 return; // Success
@@ -284,7 +285,7 @@ async function pollFileStatusAndNotify(fileName, fullUri, mimeType, originalSour
                 apiUpdateTime = response.data.updateTime; // Capture update time even on failure
                 console.error(`[pollFileStatus] File ${fileName} processing failed. Response:`, response.data);
                 const failureTime = apiUpdateTime ? new Date(apiUpdateTime).toLocaleString() : 'N/A';
-                const failureMessage = `File processing failed:\nOriginal: \`${originalSource}\`\nURI: \`${fullUri}\`\nMIME Type: \`${mimeType}\`\nFailed At: \`${failureTime}\``;
+                const failureMessage = `❌ File processing failed:\nOriginal: \`${originalSource}\`\nURI: \`${fullUri}\`\nMIME Type: \`${mimeType}\`\nFailed At: \`${failureTime}\``;
                 await sendOneBotNotification(failureMessage);
                 await sendTelegramNotification(failureMessage);
                 throw new Error(`Processing failed for file ${fileName}.`);
@@ -306,7 +307,7 @@ async function pollFileStatusAndNotify(fileName, fullUri, mimeType, originalSour
         // Check timeout condition *after* potential error logging
         if (attempts >= MAX_FILE_POLLING_ATTEMPTS) {
             console.error(`[pollFileStatus] Polling timed out for file ${fileName} after ${MAX_FILE_POLLING_ATTEMPTS} attempts.`);
-            const timeoutMessage = `Polling timed out for file:\nOriginal: \`${originalSource}\`\nURI: \`${fullUri}\`\nMIME Type: \`${mimeType}\``;
+            const timeoutMessage = `⏳ Polling timed out for file:\nOriginal: \`${originalSource}\`\nURI: \`${fullUri}\`\nMIME Type: \`${mimeType}\``; // Re-add emoji
             await sendOneBotNotification(timeoutMessage);
             await sendTelegramNotification(timeoutMessage);
             throw new Error(`Polling timed out for file ${fileName}. It did not become ACTIVE.`);
@@ -369,17 +370,27 @@ export async function handleUnderstandMedia(params, axiosInstance) {
                 else {
                     // It's a regular URL, proceed with download and processing
                     console.log(`[understandMedia] Downloading media from URL: ${url}`);
-                    localFilePath = await downloadFile(url, DEFAULT_OUTPUT_DIR, tempSubDir, `downloaded_media_${index}`);
+                    const downloadResult = await downloadFile(url, DEFAULT_OUTPUT_DIR, tempSubDir, `downloaded_media_${index}`);
+                    localFilePath = downloadResult.filePath; // Get the path from the result
+                    const downloadedContentType = downloadResult.contentType; // Get the Content-Type from the result
                     isTemp = true;
                     cleanupPaths.push(localFilePath); // Mark for cleanup
                     console.log(`[understandMedia] Media downloaded to: ${localFilePath}`);
-                    // Get MIME type for downloaded file
-                    const lookupResult = mime.lookup(localFilePath);
-                    mimeType = lookupResult === false ? undefined : lookupResult;
-                    if (!mimeType) {
-                        throw new Error(`Could not determine MIME type for downloaded file: ${localFilePath}`);
+                    // Determine MIME type: Prioritize Content-Type, fallback to lookup
+                    if (downloadedContentType) {
+                        mimeType = downloadedContentType;
+                        console.log(`[understandMedia] Using MIME type from Content-Type header: ${mimeType}`);
                     }
-                    // Correct MP3 MIME type if necessary
+                    else {
+                        console.warn(`[understandMedia] Content-Type header missing or invalid. Falling back to MIME lookup by extension.`);
+                        const lookupResult = mime.lookup(localFilePath);
+                        mimeType = lookupResult === false ? undefined : lookupResult;
+                        if (!mimeType) {
+                            throw new Error(`Could not determine MIME type for downloaded file (header missing and lookup failed): ${localFilePath}`);
+                        }
+                        console.log(`[understandMedia] Using MIME type from extension lookup: ${mimeType}`);
+                    }
+                    // Correct MP3 MIME type if necessary (even if from Content-Type, sometimes servers send audio/mpeg)
                     const fileExt = path.extname(localFilePath).toLowerCase();
                     if (fileExt === '.mp3' && mimeType === 'audio/mpeg') {
                         console.log(`[understandMedia] Correcting MIME type for .mp3 file from 'audio/mpeg' to 'audio/mp3'.`);
@@ -434,12 +445,13 @@ export async function handleUnderstandMedia(params, axiosInstance) {
                 await fs.access(fileSource.path); // Check existence
                 localFilePath = path.resolve(fileSource.path);
                 console.log(`[understandMedia] Using local file: ${localFilePath}`);
-                // Get MIME type for local file
+                // Get MIME type for local file (no Content-Type available, must use lookup)
                 const lookupResult = mime.lookup(localFilePath);
                 mimeType = lookupResult === false ? undefined : lookupResult;
                 if (!mimeType) {
-                    throw new Error(`Could not determine MIME type for file: ${localFilePath}`);
+                    throw new Error(`Could not determine MIME type for local file: ${localFilePath}`);
                 }
+                console.log(`[understandMedia] Using MIME type from extension lookup for local file: ${mimeType}`);
                 // Correct MP3 MIME type if necessary
                 const fileExt = path.extname(localFilePath).toLowerCase();
                 if (fileExt === '.mp3' && mimeType === 'audio/mpeg') {

@@ -55,7 +55,7 @@ const axiosInstance = axios.create({ // Remove explicit type annotation
 // Create the Server instance (using Server, not McpServer)
 const server = new Server({
     name: 'gemini-integrator-mcp',
-    version: '1.2.7' // Initial version
+    version: '1.2.8' // Initial version
 // Declare tool capability to allow setRequestHandler for tool schemas
 }, { capabilities: { tools: {} } });
 
@@ -200,7 +200,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
     }
 
     // Validate arguments against the schema
-    const validationResult = schema.safeParse(args);
+    // Ensure args is at least an empty object before parsing, in case client sends null/undefined
+    const argsToValidate = args || {};
+    const validationResult = schema.safeParse(argsToValidate);
 
     if (!validationResult.success) {
         console.error(`[MCP Server] Invalid arguments for tool '${name}':`, validationResult.error.errors);
