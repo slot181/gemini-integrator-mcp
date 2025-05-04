@@ -6,7 +6,7 @@ import { GEMINI_API_KEY } from '../config.js'; // Only need API Key
 export const deleteFileSchema = z.object({
     fileName: z.string().min(1).regex(/^files\/[a-zA-Z0-9]+$/, "fileName must be in the format 'files/xxxxxx'")
         .describe("Required. The relative name of the file to delete from the Google Gemini File API storage (e.g., 'files/kch7l0eddn96'). Get this from the listFiles tool."),
-}).describe("Deletes a specific file from the Google Gemini File API storage using its relative name.");
+});
 
 // Type definition for validated parameters
 type DeleteFileParams = z.infer<typeof deleteFileSchema>;

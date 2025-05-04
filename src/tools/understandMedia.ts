@@ -39,7 +39,7 @@ const understandMediaBaseSchema = z.object({
     text: z.string().min(1).describe("Required. The specific question or instruction for the Google Gemini multimodal model about the content of the provided file(s). E.g., 'Summarize this document', 'Describe this image', 'Transcribe this audio'. This field must contain the textual prompt."),
     // Updated description for 'files'
     files: z.array(fileSourceSchema).min(1).describe("Required. An array containing one or more file objects for Gemini to analyze. Each object *must* specify either a 'url', 'path', or ('file_uri' and 'mime_type') key pointing to a supported file. Example: [{path: '/path/to/report.pdf'}, {url: '...'}, {file_uri: 'https://generativelanguage.googleapis.com/v1beta/files/abcde', mime_type: 'image/png'}]"),
-}).describe("Analyzes the content of provided media files (images, audio, video, documents) using the Google Gemini multimodal understanding service and answers questions about them.");
+});
 
 // Refined schema (though base shape is used for registration)
 export const understandMediaSchema = understandMediaBaseSchema; // No top-level refine needed now

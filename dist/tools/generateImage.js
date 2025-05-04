@@ -11,7 +11,7 @@ export const generateImageSchema = z.object({
     prompt: z.string().min(1).describe("Required. Descriptive text prompt for the Google Gemini image generation service. (English is recommended for best results)."),
     // Add aspectRatio as it's used by imagen-3.0
     aspectRatio: z.enum(["1:1", "3:4", "4:3", "9:16", "16:9"]).optional().default("1:1").describe("Optional. Aspect ratio for the generated image (ignored by gemini-2.0 model)."),
-}).describe("Generates an image based on a text prompt using the Google Gemini image generation service (Imagen 3 or Gemini 2.0 Flash).");
+});
 /**
  * Handles the image generation tool request.
  * Calls the Gemini API, saves the image locally, uploads to CF ImgBed if configured,

@@ -5,7 +5,7 @@ import { GEMINI_API_KEY, GEMINI_SEARCH_MODEL, REQUEST_TIMEOUT } from '../config.
 // --- Define Input Schema ---
 export const webSearchSchema = z.object({
     query: z.string().min(1).describe("Required. The search query or question for the Google Gemini web search service. (English is recommended for best results)."),
-}).describe("Performs a web search using the Google Gemini Search Retrieval tool and returns the answer along with search sources.");
+});
 
 // Type definition for validated parameters
 type WebSearchParams = z.infer<typeof webSearchSchema>;
