@@ -3,11 +3,11 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 // Import request schemas and error types for manual handling
-// Also import CallToolRequest type for parameter typing
+// Also import CallToolRequest type
 import { ListToolsRequestSchema, CallToolRequestSchema, McpError, ErrorCode, CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import axios from 'axios'; // Remove AxiosInstance import
 import { z } from 'zod'; // Import Zod for schema validation
-import { zodToJsonSchema } from 'zod-to-json-schema'; // Import the conversion function
+// Removed zod-to-json-schema import
 
 // Import configuration variables (removed unused ones)
 import {
@@ -21,10 +21,10 @@ import {
 // Import shapes, full schemas (where different), and handlers
 import { generateImageSchema, handleGenerateImage } from './tools/generateImage.js';
 // Import both shape and the full schema for editImage
-import { editImageShape, editImageSchema, handleEditImage } from './tools/editImage.js';
+import { editImageSchema, handleEditImage } from './tools/editImage.js';
 import { generateVideoSchema, handleGenerateVideo } from './tools/generateVideo.js';
 // Import both shape and the full schema for understandMedia
-import { understandMediaShape, understandMediaSchema, handleUnderstandMedia } from './tools/understandMedia.js';
+import { understandMediaSchema, handleUnderstandMedia } from './tools/understandMedia.js';
 import { listFilesSchema, handleListFiles } from './tools/listFiles.js'; // Import listFiles tool
 import { deleteFileSchema, handleDeleteFile } from './tools/deleteFile.js'; // Import deleteFile tool
 import { webSearchSchema, handleWebSearch } from './tools/webSearch.js'; // Import webSearch tool
@@ -56,54 +56,106 @@ const axiosInstance = axios.create({ // Remove explicit type annotation
 // Create the Server instance (using Server, not McpServer)
 const server = new Server({
     name: 'gemini-integrator-mcp',
-    version: '1.2.5' // Initial version
+    version: '1.2.6' // Initial version
 // Declare tool capability to allow setRequestHandler for tool schemas
 }, { capabilities: { tools: {} } });
 
 // --- Tool Definitions with Descriptions ---
-// Define tools manually to include descriptions
+// Define tools manually, using detailed JSON Schema literals matching openapi-integrator-mcp structure
 const toolDefinitions = [
     {
         name: 'gemini_generate_image',
         description: "Generates an image based on a text prompt using the Google Gemini image generation service (Imagen 3 or Gemini 2.0 Flash).",
-        // Convert Zod schema to JSON Schema
-        input_schema: zodToJsonSchema(generateImageSchema, "gemini_generate_image_input"),
+        inputSchema: { // Use camelCase
+            type: 'object',
+            properties: {
+                prompt: { type: 'string', description: "Required. Descriptive text prompt for the Google Gemini image generation service. (English is recommended for best results)." },
+                aspectRatio: { type: 'string', enum: ["1:1", "3:4", "4:3", "9:16", "16:9"], default: "1:1", description: "Optional. Aspect ratio for the generated image (ignored by gemini-2.0 model)." },
+            },
+            required: ['prompt'],
+        },
     },
     {
         name: 'gemini_edit_image',
         description: "Edits an image based on a text prompt using the Google Gemini image editing service.",
-        // Convert Zod schema (the refined one) to JSON Schema
-        input_schema: zodToJsonSchema(editImageSchema, "gemini_edit_image_input"),
+        inputSchema: { // Use camelCase
+            type: 'object',
+            properties: {
+                prompt: { type: 'string', description: "Required. Instructions for how the Google Gemini service should edit the provided image. (English is recommended for best results)." },
+                image_url: { type: 'string', format: 'url', description: "Optional. URL of the image to edit using Gemini." },
+                image_path: { type: 'string', description: "Optional. Local path to the image to edit using Gemini." },
+            },
+            required: ['prompt'],
+        },
     },
     {
         name: 'gemini_generate_video',
         description: "Generates a video based on a text prompt using the Google Gemini video generation service (Veo). This is an asynchronous operation.",
-        // Convert Zod schema to JSON Schema
-        input_schema: zodToJsonSchema(generateVideoSchema, "gemini_generate_video_input"),
+        inputSchema: { // Use camelCase
+            type: 'object',
+            properties: {
+                prompt: { type: 'string', description: "Required. Descriptive text prompt for the Google Gemini video generation service (Veo). (English is recommended for best results)." },
+                aspectRatio: { type: 'string', enum: ["16:9", "9:16", "1:1"], default: "16:9", description: "Optional. Aspect ratio for the generated video. Defaults to 16:9." },
+                personGeneration: { type: 'string', enum: ["dont_allow", "allow_adult"], default: "dont_allow", description: "Optional. Control generation of people ('dont_allow', 'allow_adult'). Defaults to dont_allow." },
+            },
+            required: ['prompt'],
+        },
     },
     {
         name: 'gemini_understand_media',
         description: "Analyzes the content of provided media files (images, audio, video, documents) using the Google Gemini multimodal understanding service and answers questions about them.",
-        // Convert Zod schema (the refined one) to JSON Schema
-        input_schema: zodToJsonSchema(understandMediaSchema, "gemini_understand_media_input"),
+        inputSchema: { // Use camelCase
+            type: 'object',
+            properties: {
+                text: { type: 'string', description: "Required. The specific question or instruction for the Google Gemini multimodal model about the content of the provided file(s)." },
+                files: {
+                    type: 'array',
+                    minItems: 1,
+                    description: "Required. An array containing one or more file objects for Gemini to analyze. Each object *must* specify either a 'url', 'path', or ('file_uri' and 'mime_type') key pointing to a supported file.",
+                    items: {
+                        type: 'object',
+                        properties: {
+                            url: { type: 'string', format: 'url', description: "URL of the file (image, video, audio, pdf, text, code)." },
+                            path: { type: 'string', description: "Local path to the file (image, video, audio, pdf, text, code)." },
+                            file_uri: { type: 'string', format: 'url', pattern: '^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/files\/[a-zA-Z0-9]+$', description: "Optional. Pre-uploaded file URI (the full HTTPS URL returned as 'uri' by the Files API)." },
+                            mime_type: { type: 'string', description: "Required only if 'file_uri' is provided. The MIME type." },
+                        },
+                    }
+                },
+            },
+            required: ['text', 'files'],
+        },
     },
     {
         name: 'gemini_list_files',
         description: "Lists files previously uploaded to the Google Gemini File API service.",
-        // Convert Zod schema to JSON Schema
-        input_schema: zodToJsonSchema(listFilesSchema, "gemini_list_files_input"),
+        inputSchema: { // Use camelCase, ensure type:object even if no properties needed by schema itself
+            type: 'object',
+            properties: {}, // No specific properties needed for listFiles input
+            required: [],
+        },
     },
     {
         name: 'gemini_delete_file',
         description: "Deletes a specific file from the Google Gemini File API storage using its relative name.",
-        // Convert Zod schema to JSON Schema
-        input_schema: zodToJsonSchema(deleteFileSchema, "gemini_delete_file_input"),
+        inputSchema: { // Use camelCase
+            type: 'object',
+            properties: {
+                fileName: { type: 'string', pattern: '^files\/[a-zA-Z0-9]+$', description: "Required. The relative name of the file (e.g., 'files/kch7l0eddn96')." },
+            },
+            required: ['fileName'],
+        },
     },
     {
         name: 'gemini_web_search',
         description: "Performs a web search using the Google Gemini Search Retrieval tool and returns the answer along with search sources.",
-        // Convert Zod schema to JSON Schema
-        input_schema: zodToJsonSchema(webSearchSchema, "gemini_web_search_input"),
+        inputSchema: { // Use camelCase
+            type: 'object',
+            properties: {
+                query: { type: 'string', description: "Required. The search query or question." },
+            },
+            required: ['query'],
+        },
     },
 ];
 
