@@ -55,8 +55,9 @@ const axiosInstance = axios.create({ // Remove explicit type annotation
 // Create the Server instance (using Server, not McpServer)
 const server = new Server({
     name: 'gemini-integrator-mcp',
-    version: '1.2.3' // Initial version
-}, { capabilities: {} }); // Add empty capabilities object as required by Server constructor
+    version: '1.2.4' // Initial version
+// Declare tool capability to allow setRequestHandler for tool schemas
+}, { capabilities: { tools: {} } });
 
 // --- Tool Definitions with Descriptions ---
 // Define tools manually to include descriptions
