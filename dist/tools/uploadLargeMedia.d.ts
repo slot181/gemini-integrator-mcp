@@ -25,7 +25,7 @@ type UploadLargeMediaParams = z.infer<typeof uploadLargeMediaSchema>;
  * Handles the large media upload tool request.
  * Returns an immediate success message and performs upload/polling in the background.
  */
-export declare function handleUploadLargeMedia(params: UploadLargeMediaParams): Promise<{
+export declare function handleUploadLargeMedia(params: UploadLargeMediaParams, axiosInstance: any): Promise<{
     content: Array<TextContent>;
 }>;
 export {};
