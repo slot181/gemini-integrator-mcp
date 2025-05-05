@@ -89,8 +89,9 @@ async function uploadFileToGoogleApi(filePath: string, mimeType: string, display
          console.warn(`[uploadLargeMedia:uploadFileToGoogleApi] Warning: File ${filePath} (${numBytes} bytes) is not strictly larger than the configured ${USER_LIMIT_MB}MB limit (${USER_LIMIT_BYTES} bytes). Consider using 'understandMedia' directly for smaller files.`);
     }
 
-
-    const startUploadUrl = `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${GEMINI_API_KEY}`;
+    // Construct the start upload URL using the configured base URL
+    const startUploadUrl = `${GEMINI_API_URL.replace(/\/v1beta$/, '')}/upload/v1beta/files?key=${GEMINI_API_KEY}`;
+    console.log(`[uploadLargeMedia:uploadFileToGoogleApi] Using start upload URL: ${startUploadUrl}`);
 
     // 1. Start Resumable Upload
     console.log('[uploadLargeMedia:uploadFileToGoogleApi] Initiating resumable upload...');
@@ -178,7 +179,9 @@ async function uploadFileToGoogleApi(filePath: string, mimeType: string, display
  */
 async function pollFileStatusAndNotify(fileName: string, fullUri: string, mimeType: string, originalSource: string): Promise<void> {
     console.log(`[uploadLargeMedia:pollFileStatus] Starting polling for file: ${fileName} (URI: ${fullUri}, Original: ${originalSource})`);
-    const getFileUrl = `${GEMINI_API_URL}/v1beta/${fileName}?key=${GEMINI_API_KEY}`;
+    // Construct the polling URL using the configured base URL
+    const getFileUrl = `${GEMINI_API_URL}/v1beta/${fileName}?key=${GEMINI_API_KEY}`; // GEMINI_API_URL already includes /v1beta usually, but this handles cases where it might not. Ensure fileName starts correctly (e.g., files/...)
+    console.log(`[uploadLargeMedia:pollFileStatus] Using polling URL: ${getFileUrl}`);
     let attempts = 0;
     let apiUpdateTime: string | undefined;
 
