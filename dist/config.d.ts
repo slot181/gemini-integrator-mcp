@@ -7,6 +7,7 @@ export declare const CF_IMGBED_UPLOAD_URL: string | undefined;
 export declare const CF_IMGBED_API_KEY: string | undefined;
 export declare const DEFAULT_OUTPUT_DIR: string;
 export declare const REQUEST_TIMEOUT: number;
+export declare const RAW_UNDERSTAND_MEDIA_SIZE_LIMIT_MB: string | undefined;
 export declare const ONEBOT_HTTP_URL: string | undefined;
 export declare const ONEBOT_ACCESS_TOKEN: string | undefined;
 export declare const ONEBOT_MESSAGE_TYPE: string | undefined;

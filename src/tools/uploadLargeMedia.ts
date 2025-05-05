@@ -8,7 +8,7 @@ import {
     GEMINI_API_KEY,
     GEMINI_API_URL, // Needed for polling URL
     REQUEST_TIMEOUT,
-    DEFAULT_OUTPUT_DIR
+    DEFAULT_OUTPUT_DIR,
 } from '../config.js';
 import { deleteFile, downloadFile } from '../utils/fileUtils.js';
 import {
@@ -17,9 +17,12 @@ import {
     isNotificationConfigured,
     getConfiguredNotifiers
 } from '../utils/notificationUtils.js';
+import { getEffectiveMediaSizeLimit } from '../utils/mediaLimitUtils.js'; // Import the new utility function
 
 // --- Constants ---
-const MAX_FILE_SIZE_FOR_UNDERSTAND_MEDIA = 20 * 1024 * 1024; // 20MB limit for the *other* tool
+// Calculate effective limits using the utility function
+const { limitMB: USER_LIMIT_MB, limitBytes: USER_LIMIT_BYTES } = getEffectiveMediaSizeLimit('uploadLargeMedia');
+
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 
 // --- Helper function to delay execution ---
@@ -50,8 +53,8 @@ interface GetFileApiResponse extends FileInfo {}
 
 // Define the base object schema first
 const uploadLargeMediaBaseSchema = z.object({
-    url: z.string().url().optional().describe("URL of the large media file (>20MB) to upload."),
-    path: z.string().optional().describe("Local path to the large media file (>20MB) to upload."),
+    url: z.string().url().optional().describe(`URL of the large media file (larger than the configured ${USER_LIMIT_MB}MB limit for 'understandMedia') to upload via Google File API.`),
+    path: z.string().optional().describe(`Local path to the large media file (larger than the configured ${USER_LIMIT_MB}MB limit for 'understandMedia') to upload via Google File API.`),
 });
 
 // Export the shape from the base schema for tool registration
@@ -81,9 +84,9 @@ async function uploadFileToGoogleApi(filePath: string, mimeType: string, display
     if (numBytes === 0) {
         throw new Error(`File is empty and cannot be uploaded: ${filePath}`);
     }
-    // Check size again just in case, though this tool is *for* large files
-    if (numBytes <= MAX_FILE_SIZE_FOR_UNDERSTAND_MEDIA) {
-         console.warn(`[uploadLargeMedia:uploadFileToGoogleApi] Warning: File ${filePath} (${numBytes} bytes) is not strictly larger than ${MAX_FILE_SIZE_FOR_UNDERSTAND_MEDIA} bytes. Consider using 'understandMedia' for smaller files.`);
+    // Check size against the *effective* user limit calculated earlier
+    if (numBytes <= USER_LIMIT_BYTES) {
+         console.warn(`[uploadLargeMedia:uploadFileToGoogleApi] Warning: File ${filePath} (${numBytes} bytes) is not strictly larger than the configured ${USER_LIMIT_MB}MB limit (${USER_LIMIT_BYTES} bytes). Consider using 'understandMedia' directly for smaller files.`);
     }
 
 

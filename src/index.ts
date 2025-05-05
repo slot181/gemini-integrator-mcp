@@ -12,9 +12,14 @@ import { z } from 'zod'; // Import Zod for schema validation
 import {
     GEMINI_API_KEY,
     GEMINI_API_URL,
-    REQUEST_TIMEOUT
+    REQUEST_TIMEOUT,
 } from './config.js'; // Add .js extension
 // Note: CF_ACCOUNT_ID and CF_PUBLIC_URL_BASE were removed from config.ts, so removed here too.
+import { getEffectiveMediaSizeLimit } from './utils/mediaLimitUtils.js'; // Import the new utility function
+
+// --- Calculate effective limit for descriptions using the utility function ---
+const { limitMB: EFFECTIVE_LIMIT_MB_FOR_DESC } = getEffectiveMediaSizeLimit('index');
+
 
 // --- Tool Schemas and Handlers ---
 // Import shapes, full schemas (where different), and handlers
@@ -57,7 +62,7 @@ const axiosInstance = axios.create({ // Remove explicit type annotation
 // Create the Server instance (using Server, not McpServer)
 const server = new Server({
     name: 'gemini-integrator-mcp',
-    version: '1.3.0' // Initial version
+    version: '1.3.1' // Initial version
 // Declare tool capability to allow setRequestHandler for tool schemas
 }, { capabilities: { tools: {} } });
 
@@ -104,27 +109,17 @@ const toolDefinitions = [
     },
     {
         name: 'gemini_understand_media',
-        description: "Analyzes the content of provided media files (images, audio, video, documents) using the Google Gemini multimodal understanding service and answers questions about them.",
-        inputSchema: { // Use camelCase
+        description: "Analyzes the content of a provided media file (image, audio, video, document) using the Google Gemini multimodal understanding service and answers questions about it. Provide exactly one file source: 'file_url', 'file_path', or ('file_api_uri' and 'file_mime_type').",
+        inputSchema: { // Use camelCase with flattened parameters
             type: 'object',
-            properties: {
-                text: { type: 'string', description: "Required. The specific question or instruction for the Google Gemini multimodal model about the content of the provided file(s)." },
-                files: {
-                    type: 'array',
-                    minItems: 1,
-                    description: "Required. An array containing one or more file objects for Gemini to analyze. Each object *must* specify either a 'url', 'path', or ('file_uri' and 'mime_type') key pointing to a supported file.",
-                    items: {
-                        type: 'object',
-                        properties: {
-                            url: { type: 'string', format: 'url', description: "URL of the file (image, video, audio, pdf, text, code) OR a YouTube video URL (e.g., https://www.youtube.com/watch?v=...)." },
-                            path: { type: 'string', description: "Local path to the file (image, video, audio, pdf, text, code)." },
-                            file_uri: { type: 'string', format: 'url', pattern: '^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/files\/[a-zA-Z0-9]+$', description: "Optional. Pre-uploaded file URI (the full HTTPS URL returned as 'uri' by the Files API)." },
-                            mime_type: { type: 'string', description: "Required only if 'file_uri' is provided. The MIME type." },
-                        },
-                    }
-                },
+            properties: { // Define properties explicitly based on the Zod shape
+                text: { type: 'string', description: "Required. The specific question or instruction for the Google Gemini multimodal model about the content of the provided file." },
+                file_url: { type: 'string', format: 'url', description: "Optional. URL of the file (image, video, audio, pdf, text, code) OR a YouTube video URL. Provide only one file source." },
+                file_path: { type: 'string', description: "Optional. Local path to the file (image, video, audio, pdf, text, code). Provide only one file source." },
+                file_api_uri: { type: 'string', format: 'url', pattern: '^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/files\/[a-zA-Z0-9]+$', description: "Optional. Pre-uploaded file URI. If provided, 'file_mime_type' is also required. Provide only one file source." },
+                file_mime_type: { type: 'string', description: "Required only if 'file_api_uri' is provided. The MIME type." },
             },
-            required: ['text', 'files'],
+            required: ['text'], // 'text' is always required. File source requirement handled by refine in the schema itself.
         },
     },
     {
@@ -160,7 +155,7 @@ const toolDefinitions = [
     },
     {
         name: 'gemini_upload_large_media',
-        description: "Uploads a large media file (>20MB) to the Google Gemini File API in the background. Returns an immediate confirmation and sends a notification (via configured OneBot/Telegram) upon completion or failure. Requires notification setup.",
+        description: `Uploads a large media file (larger than the configured ${EFFECTIVE_LIMIT_MB_FOR_DESC}MB limit for 'understandMedia') to the Google Gemini File API in the background. Returns an immediate confirmation and sends a notification (via configured OneBot/Telegram) upon completion or failure. Requires notification setup.`,
         inputSchema: { // Use camelCase
             type: 'object',
             properties: uploadLargeMediaShape, // Use the imported shape

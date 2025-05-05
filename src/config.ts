@@ -41,6 +41,13 @@ export const DEFAULT_OUTPUT_DIR = cliArgs.DEFAULT_OUTPUT_DIR || process.env.DEFA
 // --- Request Configuration ---
 export const REQUEST_TIMEOUT = parseInt(cliArgs.REQUEST_TIMEOUT || process.env.REQUEST_TIMEOUT || '180000', 10); // Default 180 seconds (3 minutes)
 
+// --- File Handling Configuration ---
+// Export the raw user-configured limit string (MB) for the understandMedia tool.
+// The tool itself will handle parsing, validation, and defaulting.
+export const RAW_UNDERSTAND_MEDIA_SIZE_LIMIT_MB =
+    cliArgs.UNDERSTAND_MEDIA_SIZE_LIMIT_MB || process.env.UNDERSTAND_MEDIA_SIZE_LIMIT_MB;
+
+
 // --- Notification Configuration (Optional) ---
 // OneBot v11 HTTP Notification
 export const ONEBOT_HTTP_URL = cliArgs.ONEBOT_HTTP_URL || process.env.ONEBOT_HTTP_URL;
