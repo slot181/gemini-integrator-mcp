@@ -89,8 +89,9 @@ async function uploadFileToGoogleApi(filePath: string, mimeType: string, display
          console.warn(`[uploadLargeMedia:uploadFileToGoogleApi] Warning: File ${filePath} (${numBytes} bytes) is not strictly larger than the configured ${USER_LIMIT_MB}MB limit (${USER_LIMIT_BYTES} bytes). Consider using 'understandMedia' directly for smaller files.`);
     }
 
-
-    const startUploadUrl = `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${GEMINI_API_KEY}`;
+    // Construct the upload URL using the configured base URL
+    const startUploadUrl = `${GEMINI_API_URL}/upload/v1beta/files?key=${GEMINI_API_KEY}`;
+    console.log(`[uploadLargeMedia:uploadFileToGoogleApi] Using upload start URL: ${startUploadUrl}`);
 
     // 1. Start Resumable Upload
     console.log('[uploadLargeMedia:uploadFileToGoogleApi] Initiating resumable upload...');
