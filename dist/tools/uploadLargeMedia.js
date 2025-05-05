@@ -33,11 +33,10 @@ export const uploadLargeMediaSchema = uploadLargeMediaBaseSchema.refine(data => 
 });
 // --- File Upload and Polling Functions (Copied/Adapted from original understandMedia) ---
 /**
- * Uploads a file to the Google File API using the provided Axios instance for the initial request.
+ * Uploads a file to the Google File API.
  * Returns the file name (relative path) and full URI upon successful upload.
  */
-async function uploadFileToGoogleApi(filePath, mimeType, displayName, fileSize, axiosInstance // Revert to 'any' type to resolve TS error
-) {
+async function uploadFileToGoogleApi(filePath, mimeType, displayName, fileSize) {
     console.log(`[uploadLargeMedia:uploadFileToGoogleApi] Starting upload for: ${filePath}, MIME: ${mimeType}, Size: ${fileSize} bytes`);
     const numBytes = fileSize;
     if (numBytes === 0) {
@@ -50,123 +49,105 @@ async function uploadFileToGoogleApi(filePath, mimeType, displayName, fileSize, 
     // Construct the start upload URL using the configured base URL
     const startUploadUrl = `${GEMINI_API_URL.replace(/\/v1beta$/, '')}/upload/v1beta/files?key=${GEMINI_API_KEY}`;
     console.log(`[uploadLargeMedia:uploadFileToGoogleApi] Using start upload URL: ${startUploadUrl}`);
-    // 1. Start Resumable Upload using the provided axiosInstance (which points to the proxy)
-    console.log('[uploadLargeMedia:uploadFileToGoogleApi] Initiating resumable upload via proxy...');
+    // 1. Start Resumable Upload
+    console.log('[uploadLargeMedia:uploadFileToGoogleApi] Initiating resumable upload...');
     let uploadUrl = '';
     try {
-        // Use the passed axiosInstance for the initial POST request
-        const startResponse = await axiosInstance.post(
-        // The URL path should be relative to the axiosInstance baseURL (proxy)
-        `/upload/v1beta/files?key=${GEMINI_API_KEY}`, { file: { display_name: displayName } }, // Request body
-        {
+        const startResponse = await axios.post(startUploadUrl, { file: { display_name: displayName } }, {
             headers: {
                 'X-Goog-Upload-Protocol': 'resumable',
                 'X-Goog-Upload-Command': 'start',
                 'X-Goog-Upload-Header-Content-Length': numBytes.toString(),
                 'X-Goog-Upload-Header-Content-Type': mimeType,
-                // Removed 'Content-Type': 'application/json', let Axios handle it
+                'Content-Type': 'application/json',
             },
             timeout: REQUEST_TIMEOUT,
         });
-        // Extract the upload URL from the 'location' header (standard for resumable uploads)
-        // or potentially 'x-goog-upload-url' as a fallback
-        uploadUrl = startResponse.headers?.['location'] ?? startResponse.headers?.['x-goog-upload-url'] ?? '';
+        uploadUrl = startResponse.headers?.['x-goog-upload-url'] ?? '';
         if (!uploadUrl) {
-            console.error('[uploadLargeMedia:uploadFileToGoogleApi] Failed to get upload URL from headers (checked location and x-goog-upload-url):', startResponse.headers);
-            throw new Error('Failed to initiate resumable upload: No upload URL received in location or x-goog-upload-url header.');
+            console.error('[uploadLargeMedia:uploadFileToGoogleApi] Failed to get upload URL from headers:', startResponse.headers);
+            throw new Error('Failed to initiate resumable upload: No upload URL received.');
         }
-        console.log(`[uploadLargeMedia:uploadFileToGoogleApi] Got upload URL: ${uploadUrl}`);
+        console.log('[uploadLargeMedia:uploadFileToGoogleApi] Got upload URL.');
     }
     catch (error) {
         const err = error;
-        let message = 'Failed to initiate resumable upload via proxy.';
+        let message = 'Failed to initiate resumable upload.';
         if (err.response && err.message) {
-            message += ` Axios Error: ${err.message} - Status: ${err.response?.status} - Data: ${JSON.stringify(err.response?.data)}`;
-            console.error('[uploadLargeMedia:uploadFileToGoogleApi] Axios error initiating resumable upload via proxy:', err.response?.status, err.response?.data || err.message);
+            message += ` Axios Error: ${err.message} - ${JSON.stringify(err.response?.data)}`;
+            console.error('[uploadLargeMedia:uploadFileToGoogleApi] Axios error initiating resumable upload:', err.response?.data || err.message);
         }
         else if (err.message) {
             message += ` Error: ${err.message}`;
-            console.error('[uploadLargeMedia:uploadFileToGoogleApi] Error initiating resumable upload via proxy:', err.message);
+            console.error('[uploadLargeMedia:uploadFileToGoogleApi] Error initiating resumable upload:', err.message);
         }
         else {
-            console.error('[uploadLargeMedia:uploadFileToGoogleApi] Unknown error initiating resumable upload via proxy:', error);
+            console.error('[uploadLargeMedia:uploadFileToGoogleApi] Unknown error initiating resumable upload:', error);
         }
         throw new Error(message);
     }
-    // 2. Upload File Data - **Use the direct uploadUrl from Google, NOT the proxy**
-    console.log(`[uploadLargeMedia:uploadFileToGoogleApi] Uploading file data directly to Google URL: ${uploadUrl}`);
+    // 2. Upload File Data
+    console.log('[uploadLargeMedia:uploadFileToGoogleApi] Uploading file data...');
     try {
         const fileData = await fs.readFile(filePath);
-        // Use a *direct* axios call for the actual data upload, not the instance pointing to the proxy
         const uploadConfig = {
             headers: {
-                // Headers for the *data upload* request
                 'Content-Length': numBytes.toString(),
-                // 'X-Goog-Upload-Offset': '0', // Offset is usually implicit for the first chunk
-                // 'X-Goog-Upload-Command': 'upload, finalize', // Command might be implicit or handled by PUT/POST method choice
-                'Content-Type': mimeType, // Content-Type of the *file data*
+                'X-Goog-Upload-Offset': '0',
+                'X-Goog-Upload-Command': 'upload, finalize',
+                'Content-Type': mimeType,
             },
             maxBodyLength: Infinity,
             maxContentLength: Infinity,
             timeout: TWENTY_FOUR_HOURS_MS, // Set upload timeout to 24 hours
         };
-        // Use PUT for resumable upload data transfer as per Google Cloud Storage docs (often used by File API)
-        // Alternatively, POST might work depending on the specific API implementation Google uses here. Let's try PUT first.
-        // Remove type argument from axios.put and use type assertion later
-        const uploadResponse = await axios.put(uploadUrl, fileData, uploadConfig);
-        // Assert the type of the response data
-        const responseData = uploadResponse.data;
-        // Google File API might return 200 OK on successful finalization
-        if (uploadResponse.status !== 200 || !responseData?.file?.uri || !responseData?.file?.name) {
-            console.error('[uploadLargeMedia:uploadFileToGoogleApi] Direct file upload to Google failed or URI/Name missing:', uploadResponse.status, responseData);
-            throw new Error(`Direct file upload to Google failed with status ${uploadResponse.status}. Response: ${JSON.stringify(responseData)}`);
+        const uploadResponse = await axios.post(uploadUrl, fileData, uploadConfig);
+        if (uploadResponse.status !== 200 || !uploadResponse.data?.file?.uri || !uploadResponse.data?.file?.name) {
+            console.error('[uploadLargeMedia:uploadFileToGoogleApi] File upload failed or URI/Name missing:', uploadResponse.data);
+            throw new Error(`File upload failed with status ${uploadResponse.status}. Response: ${JSON.stringify(uploadResponse.data)}`);
         }
-        const { name, uri } = responseData.file; // Use asserted responseData
-        console.log(`[uploadLargeMedia:uploadFileToGoogleApi] Direct file upload successful. Name: ${name}, URI: ${uri}`);
+        const { name, uri } = uploadResponse.data.file;
+        console.log(`[uploadLargeMedia:uploadFileToGoogleApi] File uploaded successfully. Name: ${name}, URI: ${uri}`);
         return { name, uri };
     }
     catch (error) {
         const err = error;
-        let message = 'Failed to upload file data directly to Google.';
+        let message = 'Failed to upload file data.';
         if (err.response && err.message) {
-            message += ` Axios Error: ${err.message} - Status: ${err.response?.status} - Data: ${JSON.stringify(err.response?.data)}`;
-            console.error('[uploadLargeMedia:uploadFileToGoogleApi] Axios error uploading file data directly to Google:', err.response?.status, err.response?.data || err.message);
+            message += ` Axios Error: ${err.message} - ${JSON.stringify(err.response?.data)}`;
+            console.error('[uploadLargeMedia:uploadFileToGoogleApi] Axios error uploading file data:', err.response?.data || err.message);
         }
         else if (err.message) {
             message += ` Error: ${err.message}`;
-            console.error('[uploadLargeMedia:uploadFileToGoogleApi] Error uploading file data directly to Google:', err.message);
+            console.error('[uploadLargeMedia:uploadFileToGoogleApi] Error uploading file data:', err.message);
         }
         else {
-            console.error('[uploadLargeMedia:uploadFileToGoogleApi] Unknown error uploading file data directly to Google:', error);
+            console.error('[uploadLargeMedia:uploadFileToGoogleApi] Unknown error uploading file data:', error);
         }
         throw new Error(message);
     }
 }
 /**
- * Polls the Google File API (via the proxy) for the status of a file until it's ACTIVE or failed/timed out.
+ * Polls the Google File API for the status of a file until it's ACTIVE or failed/timed out.
  * Sends notifications upon successful activation or failure if configured.
  */
-async function pollFileStatusAndNotify(fileName, fullUri, mimeType, originalSource, axiosInstance // Revert to 'any' type to resolve TS error
-) {
+async function pollFileStatusAndNotify(fileName, fullUri, mimeType, originalSource) {
     console.log(`[uploadLargeMedia:pollFileStatus] Starting polling for file: ${fileName} (URI: ${fullUri}, Original: ${originalSource})`);
-    // Construct the polling URL relative to the proxy's base URL
-    const getFileUrl = `/v1beta/${fileName}?key=${GEMINI_API_KEY}`; // Relative path for axiosInstance
-    console.log(`[uploadLargeMedia:pollFileStatus] Using polling URL via proxy: ${axiosInstance.defaults.baseURL}${getFileUrl}`);
+    // Construct the polling URL using the configured base URL
+    const getFileUrl = `${GEMINI_API_URL}/v1beta/${fileName}?key=${GEMINI_API_KEY}`; // GEMINI_API_URL already includes /v1beta usually, but this handles cases where it might not. Ensure fileName starts correctly (e.g., files/...)
+    console.log(`[uploadLargeMedia:pollFileStatus] Using polling URL: ${getFileUrl}`);
     let attempts = 0;
     let apiUpdateTime;
     while (attempts < MAX_FILE_POLLING_ATTEMPTS) {
         attempts++;
-        console.log(`[uploadLargeMedia:pollFileStatus] Polling status for ${fileName} via proxy (Attempt ${attempts}/${MAX_FILE_POLLING_ATTEMPTS})...`);
+        console.log(`[uploadLargeMedia:pollFileStatus] Polling status for ${fileName} (Attempt ${attempts}/${MAX_FILE_POLLING_ATTEMPTS})...`);
         try {
-            // Use the passed axiosInstance for polling, remove type argument from .get()
-            const response = await axiosInstance.get(getFileUrl, { timeout: REQUEST_TIMEOUT });
-            // Assert the type of response.data after the call
-            const responseData = response.data;
-            const fileState = responseData?.state;
-            apiUpdateTime = responseData.updateTime; // Capture update time regardless of state
-            console.log(`[uploadLargeMedia:pollFileStatus] File ${fileName} state from proxy: ${fileState}`);
+            const response = await axios.get(getFileUrl, { timeout: REQUEST_TIMEOUT });
+            const fileState = response.data?.state;
+            apiUpdateTime = response.data.updateTime; // Capture update time regardless of state
+            console.log(`[uploadLargeMedia:pollFileStatus] File ${fileName} state: ${fileState}`);
             if (fileState === 'ACTIVE') {
-                console.log(`[uploadLargeMedia:pollFileStatus] File ${fileName} is ACTIVE via proxy. Update Time: ${apiUpdateTime}`);
+                console.log(`[uploadLargeMedia:pollFileStatus] File ${fileName} is ACTIVE. Update Time: ${apiUpdateTime}`);
                 const successTime = apiUpdateTime ? new Date(apiUpdateTime).toLocaleString() : 'N/A';
                 const notificationMessage = `✅ Large file ready:\nOriginal: \`${originalSource}\`\nURI: \`${fullUri}\`\nMIME Type: \`${mimeType}\`\nReady At: \`${successTime}\``;
                 await sendOneBotNotification(notificationMessage);
@@ -174,7 +155,7 @@ async function pollFileStatusAndNotify(fileName, fullUri, mimeType, originalSour
                 return; // Success
             }
             else if (fileState === 'FAILED') {
-                console.error(`[uploadLargeMedia:pollFileStatus] File ${fileName} processing failed via proxy. Response:`, responseData); // Use responseData here
+                console.error(`[uploadLargeMedia:pollFileStatus] File ${fileName} processing failed. Response:`, response.data);
                 const failureTime = apiUpdateTime ? new Date(apiUpdateTime).toLocaleString() : 'N/A';
                 const failureMessage = `❌ Large file processing failed:\nOriginal: \`${originalSource}\`\nURI: \`${fullUri}\`\nMIME Type: \`${mimeType}\`\nFailed At: \`${failureTime}\``;
                 await sendOneBotNotification(failureMessage);
@@ -182,19 +163,19 @@ async function pollFileStatusAndNotify(fileName, fullUri, mimeType, originalSour
                 throw new Error(`Processing failed for file ${fileName}.`);
             }
             else if (fileState === 'PROCESSING' || fileState === 'STATE_UNSPECIFIED') {
-                console.log(`[uploadLargeMedia:pollFileStatus] File ${fileName} is still ${fileState || 'in unspecified state'} via proxy.`);
+                console.log(`[uploadLargeMedia:pollFileStatus] File ${fileName} is still ${fileState || 'in unspecified state'}.`);
             }
             else {
-                console.warn(`[uploadLargeMedia:pollFileStatus] File ${fileName} has unexpected state via proxy: ${fileState}. Continuing polling.`);
+                console.warn(`[uploadLargeMedia:pollFileStatus] File ${fileName} has unexpected state: ${fileState}. Continuing polling.`);
             }
         }
         catch (pollError) {
             const err = pollError;
-            console.error(`[uploadLargeMedia:pollFileStatus] Error polling status for ${fileName} via proxy (Attempt ${attempts}):`, err.response?.data || err.message || pollError);
+            console.error(`[uploadLargeMedia:pollFileStatus] Error polling status for ${fileName} (Attempt ${attempts}):`, err.response?.data || err.message || pollError);
             // Don't throw immediately, let the loop continue until timeout
         }
         if (attempts >= MAX_FILE_POLLING_ATTEMPTS) {
-            console.error(`[uploadLargeMedia:pollFileStatus] Polling timed out for file ${fileName} via proxy after ${MAX_FILE_POLLING_ATTEMPTS} attempts.`);
+            console.error(`[uploadLargeMedia:pollFileStatus] Polling timed out for file ${fileName} after ${MAX_FILE_POLLING_ATTEMPTS} attempts.`);
             const timeoutMessage = `⏳ Polling timed out for large file:\nOriginal: \`${originalSource}\`\nURI: \`${fullUri}\`\nMIME Type: \`${mimeType}\``;
             await sendOneBotNotification(timeoutMessage);
             await sendTelegramNotification(timeoutMessage);
@@ -207,7 +188,7 @@ async function pollFileStatusAndNotify(fileName, fullUri, mimeType, originalSour
 const SUPPORTED_MIME_TYPES = new Set([
     'video/mp4', 'video/mpeg', 'video/mov', 'video/avi', 'video/x-flv',
     'video/mpg', 'video/webm', 'video/wmv', 'video/3gpp',
-    'audio/wav', 'audio/mp3', 'audio/mpeg', // Keep audio/mpeg for lookup fallback
+    'audio/wav', 'audio/mp3', 'audio/mpeg',
     'audio/aiff', 'audio/aac', 'audio/ogg', 'audio/flac',
     'image/png', 'image/jpeg', 'image/webp', 'image/heic', 'image/heif',
     'application/pdf',
@@ -221,7 +202,7 @@ const SUPPORTED_MIME_TYPES = new Set([
     'text/xml', 'application/xml',
     'text/rtf', 'application/rtf',
     'application/json',
-    'application/javascript', // Redundant but safe
+    'application/javascript',
     'application/x-typescript', 'text/typescript',
     'text/x-java-source', 'text/java',
     'text/x-c', 'text/x-csrc',
@@ -240,8 +221,7 @@ const SUPPORTED_MIME_TYPES = new Set([
  * Handles the large media upload tool request.
  * Returns an immediate success message and performs upload/polling in the background.
  */
-export async function handleUploadLargeMedia(params, axiosInstance // Revert to 'any' type to resolve TS error
-) {
+export async function handleUploadLargeMedia(params) {
     const { url, path: localInputPath } = params;
     const originalSource = url || localInputPath || 'unknown_source';
     const tempSubDir = 'tmp'; // Use 'tmp' subfolder within DEFAULT_OUTPUT_DIR
@@ -331,11 +311,9 @@ export async function handleUploadLargeMedia(params, axiosInstance // Revert to 
             // --- C. Upload and Poll ---
             console.log(`[uploadLargeMedia:background] Proceeding to upload: ${filePathToUpload}, MIME: ${mimeType}, Size: ${fileSize}`);
             const displayName = path.basename(filePathToUpload);
-            // Pass axiosInstance to uploadFileToGoogleApi
-            const uploadResult = await uploadFileToGoogleApi(filePathToUpload, mimeType, displayName, fileSize, axiosInstance);
+            const uploadResult = await uploadFileToGoogleApi(filePathToUpload, mimeType, displayName, fileSize);
             // Upload succeeded, now poll (pollFileStatusAndNotify handles notifications)
-            // Pass axiosInstance to pollFileStatusAndNotify
-            await pollFileStatusAndNotify(uploadResult.name, uploadResult.uri, mimeType, originalSource, axiosInstance);
+            await pollFileStatusAndNotify(uploadResult.name, uploadResult.uri, mimeType, originalSource);
             console.log(`[uploadLargeMedia:background] Successfully processed and notified for: ${originalSource}`);
         }
         catch (error) {

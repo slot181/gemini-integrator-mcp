@@ -49,7 +49,7 @@ const axiosInstance = axios.create({
 // Create the Server instance (using Server, not McpServer)
 const server = new Server({
     name: 'gemini-integrator-mcp',
-    version: '1.3.3' // Initial version
+    version: '1.3.4' // Initial version
     // Declare tool capability to allow setRequestHandler for tool schemas
 }, { capabilities: { tools: {} } });
 // --- Tool Definitions with Descriptions ---
@@ -213,7 +213,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             case 'gemini_web_search':
                 return await handleWebSearch(validatedArgs, axiosInstance);
             case 'gemini_upload_large_media':
-                return await handleUploadLargeMedia(validatedArgs, axiosInstance); // Pass axiosInstance
+                return await handleUploadLargeMedia(validatedArgs); // Does not need axiosInstance directly
             default:
                 // This case should be caught by the check above or schema lookup
                 throw new McpError(ErrorCode.MethodNotFound, `Tool '${name}' not found.`);
