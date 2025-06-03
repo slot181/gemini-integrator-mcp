@@ -15,7 +15,10 @@ export async function handleWebSearch(params, axiosInstance // Use 'any' type co
     // Add a prefix to encourage web search
     const prefixedQuery = `Please search the internet for the following questions: ${query}`;
     const requestPayload = {
-        contents: [{ parts: [{ text: prefixedQuery }] }], // Use the prefixed query
+        contents: [{
+                role: "user",
+                parts: [{ text: prefixedQuery }]
+            }], // Use the prefixed query
         tools: [{
                 google_search: {}
             }]

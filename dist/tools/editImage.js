@@ -141,6 +141,7 @@ export async function handleEditImage(params, axiosInstance // Use 'any' to bypa
         const apiUrl = `/v1beta/models/gemini-2.0-flash-exp-image-generation:generateContent?key=${GEMINI_API_KEY}`;
         const requestPayload = {
             contents: [{
+                    role: "user",
                     parts: [
                         { text: prompt },
                         {

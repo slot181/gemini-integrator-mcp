@@ -41,13 +41,6 @@ interface GeminiContentPart {
         data: string; // Base64 encoded image data
     };
 }
-interface GeminiImageEditResponse { // Assuming similar structure to generation
-    candidates?: Array<{
-        content: {
-            parts: Array<GeminiContentPart>;
-        };
-    }>;
-}
 
 // Helper function to download an image from a URL to a temporary file
 async function downloadImageToTemp(url: string, tempDir: string): Promise<{ tempPath: string, mimeType: string | null }> {
@@ -179,6 +172,7 @@ export async function handleEditImage(
 
         const requestPayload = {
             contents: [{
+                role: "user",
                 parts: [
                     { text: prompt },
                     {

@@ -48,6 +48,7 @@ export async function handleGenerateImage(params, axiosInstance // Use 'any' for
             apiUrl = `/v1beta/models/${selectedModel}:generateContent?key=${GEMINI_API_KEY}`;
             requestPayload = {
                 contents: [{
+                        role: "user",
                         parts: [{ text: prompt }]
                     }],
                 // Specify that we want an IMAGE response modality

@@ -426,7 +426,12 @@ export async function handleUnderstandMedia(
             requestParts.push({ file_data: { file_uri: processedFile.youtubeUrl } }); // No mime_type needed for YouTube
         }
 
-        const requestPayload = { contents: [{ parts: requestParts }] };
+        const requestPayload = {
+            contents: [{
+                role: "user",
+                parts: requestParts
+            }]
+        };
 
         // Log payload carefully - potentially large base64 data
         console.log(`[understandMedia] Calling Gemini (${GEMINI_UNDERSTANDING_MODEL}) with 1 file...`);

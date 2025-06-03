@@ -30,18 +30,6 @@ interface GeminiContentPart {
     };
 }
 
-// Define the expected structure of the Gemini API response (simplified)
-// Adjust based on the actual Gemini API response structure for image generation
-interface GeminiImageGenerationResponse {
-    candidates?: Array<{
-        content: {
-            parts: Array<GeminiContentPart>; // Use the defined type here
-        };
-    }>;
-    // Include other potential fields like 'error' if applicable
-}
-
-
 /**
  * Handles the image generation tool request.
  * Calls the Gemini API, saves the image locally, uploads to CF ImgBed if configured,
@@ -83,6 +71,7 @@ export async function handleGenerateImage(
             apiUrl = `/v1beta/models/${selectedModel}:generateContent?key=${GEMINI_API_KEY}`;
             requestPayload = {
                 contents: [{
+                    role: "user",
                     parts: [{ text: prompt }]
                 }],
                 // Specify that we want an IMAGE response modality

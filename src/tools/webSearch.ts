@@ -66,7 +66,10 @@ export async function handleWebSearch(
     const prefixedQuery = `Please search the internet for the following questions: ${query}`;
 
     const requestPayload = {
-        contents: [{ parts: [{ text: prefixedQuery }] }], // Use the prefixed query
+        contents: [{
+            role: "user",
+            parts: [{ text: prefixedQuery }]
+        }], // Use the prefixed query
         tools: [{
             google_search: {}
         }]
