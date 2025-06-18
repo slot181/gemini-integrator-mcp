@@ -24,7 +24,7 @@ import { listFilesSchema, handleListFiles } from './tools/listFiles.js'; // Impo
 import { deleteFileSchema, handleDeleteFile } from './tools/deleteFile.js'; // Import deleteFile tool
 import { webSearchSchema, handleWebSearch } from './tools/webSearch.js'; // Import webSearch tool
 // Import the new large media upload tool
-import { uploadLargeMediaSchema, uploadLargeMediaShape, handleUploadLargeMedia } from './tools/uploadLargeMedia.js';
+import { uploadLargeMediaSchema, handleUploadLargeMedia } from './tools/uploadLargeMedia.js';
 // --- Initialization ---
 // Validate essential configuration
 if (!GEMINI_API_KEY) {
@@ -49,7 +49,7 @@ const axiosInstance = axios.create({
 // Create the Server instance (using Server, not McpServer)
 const server = new Server({
     name: 'gemini-integrator-mcp',
-    version: '1.3.7' // Initial version
+    version: '1.3.9' // Initial version
     // Declare tool capability to allow setRequestHandler for tool schemas
 }, { capabilities: { tools: {} } });
 // --- Tool Definitions with Descriptions ---
@@ -95,7 +95,7 @@ const toolDefinitions = [
     },
     {
         name: 'gemini_understand_media',
-        description: "Analyzes the content of a provided media file (image, audio, video, document) using the Google Gemini multimodal understanding service and answers questions about it. Provide exactly one file source: 'file_url', 'file_path', or ('file_api_uri' and 'file_mime_type').",
+        description: "Analyzes the content of a provided media file (image, audio, video, document) using the Google Gemini multimodal understanding service and answers questions about it. Provide exactly one file source: 'file_url', 'file_path', or ('file_api_uri' and 'file_mime_type'). Do not use Base64 encoded strings.",
         inputSchema: {
             type: 'object',
             properties: {
@@ -144,8 +144,11 @@ const toolDefinitions = [
         description: `Uploads a large media file (larger than the configured ${EFFECTIVE_LIMIT_MB_FOR_DESC}MB limit for 'understandMedia') to the Google Gemini File API in the background. Returns an immediate confirmation and sends a notification (via configured OneBot/Telegram) upon completion or failure. Requires notification setup.`,
         inputSchema: {
             type: 'object',
-            properties: uploadLargeMediaShape, // Use the imported shape
-            required: ['url', 'path'].filter(prop => uploadLargeMediaShape[prop] && !uploadLargeMediaShape[prop].isOptional()), // Dynamically determine required based on shape (though refine handles it)
+            properties: {
+                url: { type: 'string', format: 'url', description: `Optional. URL of the large media file (larger than ${EFFECTIVE_LIMIT_MB_FOR_DESC}MB) to upload.` },
+                path: { type: 'string', description: `Optional. Local path to the large media file (larger than ${EFFECTIVE_LIMIT_MB_FOR_DESC}MB) to upload.` },
+            },
+            required: [], // The refine function in the schema handles the one-of logic
         },
     },
 ];

@@ -1,9 +1,15 @@
 import { z } from 'zod';
 import type { TextContent } from '@modelcontextprotocol/sdk/types.js';
-export declare const uploadLargeMediaShape: {
+export declare const uploadLargeMediaBaseSchema: z.ZodObject<{
     url: z.ZodOptional<z.ZodString>;
     path: z.ZodOptional<z.ZodString>;
-};
+}, "strip", z.ZodTypeAny, {
+    path?: string | undefined;
+    url?: string | undefined;
+}, {
+    path?: string | undefined;
+    url?: string | undefined;
+}>;
 export declare const uploadLargeMediaSchema: z.ZodEffects<z.ZodObject<{
     url: z.ZodOptional<z.ZodString>;
     path: z.ZodOptional<z.ZodString>;

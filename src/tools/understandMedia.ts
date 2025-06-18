@@ -206,53 +206,7 @@ export async function handleUnderstandMedia(
                 };
                 // No MIME type, size check, upload, or polling needed for YouTube URLs
             } else {
-                // It's a regular URL, try HEAD request first to check size
-                console.log(`[understandMedia] Checking size for URL via HEAD request: ${url}`);
-                let shouldDownload = true; // Assume download is needed unless HEAD proves otherwise
-                try {
-                    const headResponse = await axios.head(url, { timeout: REQUEST_TIMEOUT / 2 }); // Shorter timeout for HEAD
-                    const contentLengthHeader = headResponse.headers['content-length'];
-
-                    if (contentLengthHeader && /^\d+$/.test(contentLengthHeader)) {
-                        const headFileSize = parseInt(contentLengthHeader, 10);
-                            console.log(`[understandMedia] HEAD request successful. Content-Length: ${headFileSize} bytes.`);
-                            // Use the calculated USER_LIMIT_BYTES for comparison
-                            if (headFileSize > USER_LIMIT_BYTES) {
-                                // File is too large based on HEAD and user config, prevent download and throw error
-                                console.log(`[understandMedia] File size from HEAD (${headFileSize}) exceeds user limit (${USER_LIMIT_BYTES}). Skipping download.`);
-                                shouldDownload = false;
-                                throw new Error(`File from URL '${originalSource}' is too large (${headFileSize} bytes > ${USER_LIMIT_BYTES} bytes based on Content-Length and user configuration). Please use the 'uploadLargeMedia' tool for files larger than ${USER_LIMIT_MB}MB.`);
-                            } else {
-                                // Size is OK based on HEAD and user config, proceed to download
-                                console.log(`[understandMedia] File size from HEAD is within user limit. Proceeding with download.`);
-                            shouldDownload = true;
-                        }
-                    } else {
-                        // HEAD succeeded but no valid Content-Length, proceed to download for size check
-                        console.warn(`[understandMedia] HEAD request for ${url} did not return a valid Content-Length header. Proceeding with download to check size.`);
-                        shouldDownload = true;
-                    }
-                } catch (headError: any) {
-                     // Check if the error is the specific "too large" error we threw above
-                    if (headError instanceof Error && headError.message.includes("is too large")) {
-                        // Re-throw the specific error to ensure it propagates correctly
-                        throw headError;
-                    }
-                    // Log other HEAD request errors and proceed to download as fallback
-                    console.warn(`[understandMedia] HEAD request failed for ${url} (Error: ${headError.message}). Proceeding with download to check size.`);
-                    shouldDownload = true; // Proceed to download if HEAD fails for other reasons
-                }
-
-                // --- Download only if necessary ---
-                if (!shouldDownload) {
-                     // This should technically not be reached if the "too large" error was thrown correctly,
-                     // but serves as an extra safeguard.
-                     console.error("[understandMedia] Internal logic error: Download should have been skipped but wasn't.");
-                     // Ensure the original error is thrown if somehow we get here without it.
-                     // Use USER_LIMIT_MB in the error message
-                     throw new Error(`File from URL '${originalSource}' was determined to be too large based on Content-Length (>${USER_LIMIT_MB}MB), but download was not skipped.`);
-                }
-
+                // It's a regular URL. Download directly.
                 console.log(`[understandMedia] Downloading media from URL: ${url}`);
                 // Use the default timeout for the actual download
                 const downloadResult = await downloadFile(url, DEFAULT_OUTPUT_DIR, tempSubDir, `downloaded_media_0`); // Index 0 as there's only one file
@@ -426,12 +380,12 @@ export async function handleUnderstandMedia(
             requestParts.push({ file_data: { file_uri: processedFile.youtubeUrl } }); // No mime_type needed for YouTube
         }
 
-        const requestPayload = {
-            contents: [{
-                role: "user",
-                parts: requestParts
-            }]
-        };
+        let requestPayload;
+        if (processedFile.type === 'youtube') {
+            requestPayload = { contents: [{ parts: requestParts }] };
+        } else {
+            requestPayload = { contents: [{ role: "user", parts: requestParts }] };
+        }
 
         // Log payload carefully - potentially large base64 data
         console.log(`[understandMedia] Calling Gemini (${GEMINI_UNDERSTANDING_MODEL}) with 1 file...`);

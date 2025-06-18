@@ -18,12 +18,10 @@ const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const FILE_POLLING_INTERVAL_MS = 2000; // Check every 2 seconds
 const MAX_FILE_POLLING_ATTEMPTS = 90; // Max attempts (e.g., 90 * 2s = 180 seconds timeout)
 // Define the base object schema first
-const uploadLargeMediaBaseSchema = z.object({
+export const uploadLargeMediaBaseSchema = z.object({
     url: z.string().url().optional().describe(`URL of the large media file (larger than the configured ${USER_LIMIT_MB}MB limit for 'understandMedia') to upload via Google File API.`),
     path: z.string().optional().describe(`Local path to the large media file (larger than the configured ${USER_LIMIT_MB}MB limit for 'understandMedia') to upload via Google File API.`),
 });
-// Export the shape from the base schema for tool registration
-export const uploadLargeMediaShape = uploadLargeMediaBaseSchema.shape;
 // Apply refinement to the base schema for validation and type inference
 export const uploadLargeMediaSchema = uploadLargeMediaBaseSchema.refine(data => {
     const sources = [data.url, data.path].filter(Boolean).length;

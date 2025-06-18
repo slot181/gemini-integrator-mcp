@@ -52,14 +52,10 @@ interface FileApiResponse {
 interface GetFileApiResponse extends FileInfo {}
 
 // Define the base object schema first
-const uploadLargeMediaBaseSchema = z.object({
+export const uploadLargeMediaBaseSchema = z.object({
     url: z.string().url().optional().describe(`URL of the large media file (larger than the configured ${USER_LIMIT_MB}MB limit for 'understandMedia') to upload via Google File API.`),
     path: z.string().optional().describe(`Local path to the large media file (larger than the configured ${USER_LIMIT_MB}MB limit for 'understandMedia') to upload via Google File API.`),
 });
-
-// Export the shape from the base schema for tool registration
-export const uploadLargeMediaShape = uploadLargeMediaBaseSchema.shape;
-
 // Apply refinement to the base schema for validation and type inference
 export const uploadLargeMediaSchema = uploadLargeMediaBaseSchema.refine(data => {
     const sources = [data.url, data.path].filter(Boolean).length;
